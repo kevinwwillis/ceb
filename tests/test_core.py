@@ -547,3 +547,21 @@ def test_forget_removes_a_screen_or_audio_device_from_the_history(make_ceb):
     assert ceb.known().inputs  # inputs untouched
     with pytest.raises(ValueError):
         ceb.forget_audio("speaker", out)
+
+
+def test_identity_describe_does_not_repeat_the_vendor():
+    from ceb_profiles.model import Identity
+    assert Identity.of("LEN", "LEN LI2364d", "0x01010101").describe() == "LEN LI2364d, serial 0x01010101"
+    assert Identity.of("AUS", "ROG PG248Q", "L8LMQS075392").describe() == "AUS ROG PG248Q, serial L8LMQS075392"
+    assert Identity.of("STK", "", "").describe() == "STK, serial (none)"
+
+
+def test_missing_screen_message_uses_the_remembered_name(make_ceb):
+    from conftest import PROJECTOR, mon, reply
+    ceb = make_ceb(reply([mon("DP-1", PROJECTOR)]))
+    ceb.save_current("tv")
+    ceb.display.set(desk(1))
+    result = ceb.apply("tv")
+    message = next(p.message for p in result.problems if p.kind == "missing_screen")
+    assert message.startswith("S2-TEK TV is not connected")
+    assert "serial" not in message and "STK" not in message

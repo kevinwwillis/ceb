@@ -50,9 +50,23 @@ def describe_screen(sid: ScreenId, twin_total: int | None = None, display_name: 
     return label
 
 
-def plan_display(layout: DisplayLayout, state: DisplayState) -> DisplayPlan:
+def screen_name(sid: ScreenId, twin_total: int | None = None, display_name: str = "") -> str:
+    """A screen for messages to people: its display name (as GNOME shows it; remembered in
+    known.json) if known, else make, model and serial; plus which twin it is, for identical twins."""
+    label = display_name or sid.identity.describe()
+    if twin_total and twin_total > 1 or sid.twin > 0:
+        total = max(twin_total or 0, sid.twin + 1)
+        position = "lowest port" if sid.twin == 0 else ("highest port" if sid.twin == total - 1
+                                                         else f"port position {sid.twin + 1}")
+        label += f", identical twin {sid.twin + 1} of {total} (the one on the {position})"
+    return label
+
+
+def plan_display(layout: DisplayLayout, state: DisplayState,
+                 names: dict[ScreenId, str] | None = None) -> DisplayPlan:
     """Map the profile's screens to the connected monitors. Always returns a plan for whatever can be
-    applied plus the list of problems; the caller decides whether problems block."""
+    applied plus the list of problems; the caller decides whether problems block. names: the
+    remembered display name of each screen (known.json), used in messages."""
     connected = state.by_screen()
     problems: list[Problem] = []
     notes: list[str] = []
@@ -68,7 +82,7 @@ def plan_display(layout: DisplayLayout, state: DisplayState) -> DisplayPlan:
         for ps in lm.screens:
             cm = connected.get(ps.screen)
             if cm is None:
-                problems.append(Problem("missing_screen", _missing_screen_message(ps, state, twin_total)))
+                problems.append(Problem("missing_screen", _missing_screen_message(ps, state, twin_total, names or {})))
                 continue
             mode = cm.find_mode(ps.mode)
             if mode is None:
@@ -123,10 +137,11 @@ def plan_display(layout: DisplayLayout, state: DisplayState) -> DisplayPlan:
     return DisplayPlan(out, properties, problems, notes, turned_off)
 
 
-def _missing_screen_message(ps: ProfileScreen, state: DisplayState, twin_total: dict) -> str:
+def _missing_screen_message(ps: ProfileScreen, state: DisplayState, twin_total: dict, names: dict) -> str:
     sid = ps.screen
     same = [m for m in state.monitors if m.identity == sid.identity]
-    msg = f"{describe_screen(sid, twin_total.get(sid.identity))} is not connected"
+    name = names.get(sid) or next((m.display_name for m in same if m.display_name), "")
+    msg = f"{screen_name(sid, twin_total.get(sid.identity), name)} is not connected"
     if same:
         msg += (f"; only {len(same)} screen(s) of this model are connected, so CEB cannot tell which "
                 f"of the identical twins is unplugged")
