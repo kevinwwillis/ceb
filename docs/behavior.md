@@ -1,6 +1,6 @@
 # How PAM finds screens and audio devices, and what it does when one is missing
 
-Status: core library and CLI, 2026-11-05 16:00 ET (TASK-1.3, TASK-1.4, TASK-1.6 CLI part).
+Status: core library and CLI, 2026-11-05.
 
 ## Screens are found by what they are, not by port
 
@@ -12,9 +12,9 @@ same cables appear as HDMI-1/2/3 on one boot and HDMI-2/3/4 on the next.
 
 ## Identical twins
 
-Two monitors of the same model can report the same serial (Kevin's two Lenovo LI2364d both report
-`0x01010101`, and their EDIDs are byte-for-byte identical, checked 2026-11-05 15:50 ET). Nothing
-about the monitors tells them apart, so PAM uses port order:
+Two monitors of the same model can report the same serial (for example two Lenovo LI2364d that both
+report `0x01010101`, with byte-for-byte identical EDIDs). Nothing about the monitors tells them
+apart, so PAM uses port order:
 
 - Among the connected screens that share an identity, the one on the lowest port is twin 0, the
   next twin 1, and so on. A profile stores the twin number, not the port.
@@ -26,12 +26,21 @@ about the monitors tells them apart, so PAM uses port order:
   the order within a card stays. The type comes before the number because comparing numbers across
   types is not stable (HDMI-1 vs DP-2 can become HDMI-2 vs DP-2). The GPU comes first so twins on two
   different cards keep their order when the cards swap numbers.
-- If the GPU of a port cannot be told for sure (no sysfs, or two cards both have a port of that
-  name), it is left out of the key for that port and ordering falls back to type and number.
+- If the GPU of any twin's port cannot be told for sure (sysfs unreadable, the port not reported
+  as connected during a hotplug, or two cards both have a port of that name), the GPU is left out
+  for every twin of that model, and they are ordered by type and number only. Leaving it out for
+  just one twin would let a failed lookup reorder them. When this happens with some GPUs known,
+  `pam apply` prints a note.
 
 Limits (no data can fix these):
 
 - If the two twins' cables are swapped between ports, the twins swap places in every profile.
+- The order has no memory: it is worked out from the ports the twins are on now. Moving only one
+  twin's cable can swap the twins, for example from one GPU to the other, or from HDMI to DP (DP
+  sorts before HDMI), whenever the moved twin lands on the other side of its twin in port order.
+  Re-save the affected profiles after moving a twin's cable, or swap their places in the profile.
+- On a two-GPU machine where the twins are on different cards, a GPU lookup that fails falls back
+  to port-name order, which can differ from the card order after the cards swap numbers at boot.
 - If only one twin is connected, it is always twin 0. A profile that needs both reports twin 2 as
   missing and says PAM cannot tell which physical twin is unplugged. A profile saved while only
   one twin was connected uses whichever twin is on the lowest port later.
@@ -43,6 +52,12 @@ Mutter's `MonitorsChanged` signal), it records each one in `known.json`: identit
 display name, all modes, the last port and GPU, first and last seen. Entries are never removed
 automatically, so the GUI can show and place screens that are not connected. Twins get one entry
 each. Audio devices are remembered by name with their description.
+
+- "Last seen" is kept to the hour: seeing the same screens and devices again rewrites `known.json`
+  only when something else changed or the stored time is more than an hour old.
+- Updating the history is best-effort. If `known.json` cannot be read or written (a corrupt file,
+  a read-only or full disk), applying and saving still work and the problem is reported (`pam
+  apply` prints it as a note, `pam list` prints it and exits 1 after listing what it can).
 
 ## Applying a profile
 
@@ -63,18 +78,28 @@ device not present):
   a keyboard shortcut the same text appears as a desktop notification. Reason: a partial layout is a
   different layout from the one asked for, and silently doing something else is what PAM must not do.
 - With `--allow-missing` (`allow_missing=True` in the API), PAM applies the rest, reports each
-  skipped item, and exits 3. If the primary screen was skipped, the first remaining screen becomes
+  skipped item, and exits 3. Problems that make the layout itself wrong are never skipped: a
+  profile saved in a layout mode GNOME cannot switch to, or one with no screen left to turn on. If the primary screen was skipped, the first remaining screen becomes
   primary; the layout is moved so it starts at (0, 0). Gaps are not closed: if the skipped screen
   was between two others, Mutter refuses the layout ("Logical monitors not adjacent") and that is
   reported.
 - A profile with no screen left to turn on is never applied.
-- If the screens fail to apply, audio is not changed.
+- Screens are applied first, then audio. If the screens fail to apply, audio is not changed.
+- An HDMI or DisplayPort audio device (its node name or description says "hdmi" or "displayport")
+  can exist only while its screen is on. When such a device is missing and the profile turns on a
+  screen that is off now, PAM does not refuse: it applies the screens, then waits up to 5 s for the
+  device. If it appears, it is set; if not, it is reported as missing (the screens have then
+  changed, so `pam apply` says "only partly applied" and exits 1, or 3 with `--allow-missing`).
+  Another device is never used in its place. Any other missing device refuses as above.
 
 ## Desktop notifications
 
 `pam apply` reports every failure through `org.freedesktop.Notifications` (D-Bus, through Gio),
 falling back to `notify-send`, and always prints it to stderr. `--dry-run` and `--no-notify` print
-only. Unexpected errors in `apply` are notified too, with the error type.
+only. Unexpected errors in `apply` are notified too, with the error type. A wrong command line
+(`pam apply` without a name, a misspelt command) is notified when stderr is not a terminal, which is
+the case for a keyboard shortcut, and exits 2. Failures use critical urgency; a partial success
+with `--allow-missing` (exit 3) uses normal urgency.
 
 ## Audio library: pulsectl
 
@@ -90,5 +115,11 @@ libpulse) to read and set the default sink and source through pipewire-pulse:
 ## Files
 
 `$XDG_CONFIG_HOME/pam/` (default `~/.config/pam/`): `profiles.json` and `known.json`, both
-`{"version": 1, ...}`. Writes are atomic and locked. A file PAM cannot parse, or one written by a
-newer PAM, is reported and never overwritten.
+`{"version": 1, ...}`. Writes are atomic and locked. A file PAM cannot parse, one with values of the
+wrong type, or one written by a newer PAM, is reported and never overwritten. If either file is a
+symlink, PAM writes to the file it points to and the link stays.
+
+Lock files: `.lock` in that folder for the files, and `$XDG_RUNTIME_DIR/pam-apply.lock` (or
+`.apply.lock` in the config folder when there is no runtime folder) so only one profile switch runs
+at a time. PAM never follows a symlink there, never truncates them, and refuses one owned by
+another user.

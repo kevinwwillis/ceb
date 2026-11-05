@@ -8,7 +8,7 @@ from pam_profiles.mutter import (ApplyLogicalMonitor, ApplyMonitor, MutterDispla
                                  parse_current_state, remote_error_message)
 
 
-def test_parse_kevins_desk():
+def test_parse_real_desk():
     state = parse_current_state(desk(1))
     assert state.serial == 1 and state.layout_mode == 1 and state.supports_changing_layout_mode
     rog = state.by_connector("HDMI-3")
@@ -79,7 +79,7 @@ def _fake_sysfs(root, cards):
 
 
 def test_find_gpu_maps_mutter_hdmi_name_to_kernel_hdmi_a(tmp_path):
-    # Layout seen on KEVIN-PC-1: NVIDIA numbers ports across both cards.
+    # Layout seen on a real two-GPU desktop: the NVIDIA driver numbers ports across both cards.
     root = _fake_sysfs(tmp_path / "drm", {
         "card0": ("0000:2d:00.0", {"HDMI-A-1": "connected", "HDMI-A-2": "connected", "DP-1": "disconnected"}),
         "card1": ("0000:2e:00.0", {"HDMI-A-4": "connected", "DP-4": "disconnected"}),

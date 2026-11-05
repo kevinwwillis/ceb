@@ -1,6 +1,8 @@
-"""Fakes for Mutter's DisplayConfig and the audio server, and builders for Kevin's real desk.
+"""Fakes for Mutter's DisplayConfig and the audio server, and builders for a real three-monitor desk.
 
-Monitor data copied from GetCurrentState on KEVIN-PC-1, 2026-11-05 15:49 ET (modes shortened)."""
+Monitor and audio data copied from GetCurrentState and the audio server of a real two-GPU desktop
+(two identical Lenovo LI2364d that report the same serial, an ASUS ROG PG248Q, a TV on DP),
+2026-11-05 (modes shortened)."""
 from __future__ import annotations
 
 import pytest
@@ -50,7 +52,7 @@ def reply(monitors, logical=None, serial=1, layout_mode=1):
 
 
 def desk(base, shuffle=False, extra=(), gpu="0000:2d:00.0"):
-    """Kevin's desk with the ports numbered from `base` (1 -> HDMI-1/2/3, 2 -> HDMI-2/3/4).
+    """The real desk with the ports numbered from `base` (1 -> HDMI-1/2/3, 2 -> HDMI-2/3/4).
     Lenovo on the lowest port is on the left, ROG in the middle, the other Lenovo on the right."""
     left, right, rog = (mon(f"HDMI-{base}", LENOVO), mon(f"HDMI-{base + 1}", LENOVO),
                         mon(f"HDMI-{base + 2}", ROG))

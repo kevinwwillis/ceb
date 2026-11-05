@@ -3,8 +3,8 @@
 Why pulsectl (libpulse via ctypes):
 - PipeWire desktops run pipewire-pulse, so the PulseAudio API is the one interface that works on
   both PipeWire and plain PulseAudio systems.
-- It needs no command-line tool: pactl is often not installed (it is not on Kevin's PC), and wpctl
-  prints text meant for people, which would have to be parsed.
+- It needs no command-line tool: pactl is often not installed on PipeWire systems, and wpctl prints
+  text meant for people, which would have to be parsed.
 - It works inside a Flatpak: libpulse is part of the freedesktop/GNOME runtimes, and access is the
   standard `--socket=pulseaudio` permission. A Flatpak cannot run the host's wpctl.
 - It is pure Python on top of libpulse.so.0 (no compiled extension), MIT-licensed, maintained.
