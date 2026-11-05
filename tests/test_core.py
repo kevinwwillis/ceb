@@ -327,3 +327,165 @@ def test_audio_down_still_lets_screens_be_listed(make_pam):
     pam.audio.down = True
     state, audio, errors = pam.current()
     assert len(state.monitors) == 3 and audio is None and errors
+
+
+# ------------------------------------------------------------ history is best-effort
+
+
+def test_history_write_failure_does_not_block_apply(make_pam, monkeypatch):
+    pam = make_pam(desk(1))
+    pam.save_current("desk")
+
+    def full(known):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(pam.store, "save_known", full)
+    pam.display.set(desk(2, extra=[mon("DP-2", PROJECTOR)]))   # a new screen: history must change
+    result = pam.apply("desk")
+    assert result.ok and result.applied_display
+    assert any("history not updated" in n and "No space" in n for n in result.notes)
+
+
+def test_read_only_config_folder_does_not_block_apply(make_pam, monkeypatch):
+    pam = make_pam(desk(1))
+    pam.save_current("desk")
+    monkeypatch.delenv("XDG_RUNTIME_DIR")
+    pam.apply("desk")                       # creates the fallback lock file while writable
+    pam.display.set(desk(2, extra=[mon("DP-2", PROJECTOR)]))
+    pam.store.dir.chmod(0o500)
+    try:
+        result = pam.apply("desk")
+    finally:
+        pam.store.dir.chmod(0o700)
+    assert result.applied_display and not result.errors
+    assert any("history not updated" in n for n in result.notes)
+
+
+def test_corrupt_history_does_not_block_listing(make_pam):
+    pam = make_pam(desk(1))
+    pam.store.dir.mkdir(parents=True)
+    pam.store.known_path.write_text("{broken")
+    state, audio, errors = pam.current()
+    assert len(state.monitors) == 3 and errors == []
+    assert "not valid JSON" in pam.last_history_error
+    assert pam.store.known_path.read_text() == "{broken"
+
+
+# ------------------------------------------------------------ the apply lock
+
+
+def test_apply_lock_without_runtime_dir_stays_in_the_config_folder(make_pam, monkeypatch, tmp_path):
+    monkeypatch.delenv("XDG_RUNTIME_DIR")
+    pam = make_pam(desk(1))
+    pam.save_current("desk")
+    assert pam.apply("desk").ok
+    assert (pam.store.dir / ".apply.lock").is_file()
+
+
+@pytest.mark.parametrize("runtime", [True, False])
+def test_apply_lock_symlink_is_refused_and_not_followed(make_pam, monkeypatch, tmp_path, private_dirs, runtime):
+    pam = make_pam(desk(1))
+    pam.save_current("desk")
+    if runtime:
+        lock = private_dirs / "pam-apply.lock"
+    else:
+        monkeypatch.delenv("XDG_RUNTIME_DIR")
+        lock = pam.store.dir / ".apply.lock"
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me")
+    lock.symlink_to(victim)
+    result = pam.apply("desk")
+    assert not result.ok and "symlink" in result.errors[0]
+    assert pam.display.calls == [] and victim.read_text() == "keep me"
+
+
+def test_apply_lock_owned_by_someone_else_is_refused(make_pam, monkeypatch, private_dirs):
+    import os
+    pam = make_pam(desk(1))
+    pam.save_current("desk")
+    (private_dirs / "pam-apply.lock").write_text("theirs")
+    real_uid = os.getuid()
+    monkeypatch.setattr(os, "getuid", lambda: real_uid + 1)
+    result = pam.apply("desk")
+    assert "not a regular file owned by you" in result.errors[0] and pam.display.calls == []
+    assert (private_dirs / "pam-apply.lock").read_text() == "theirs"
+
+
+def test_apply_lock_is_not_truncated(make_pam, private_dirs):
+    pam = make_pam(desk(1))
+    pam.save_current("desk")
+    (private_dirs / "pam-apply.lock").write_text("x")
+    assert pam.apply("desk").ok
+    assert (private_dirs / "pam-apply.lock").read_text() == "x"
+
+
+# ------------------------------------------------------------ stale serial retry
+
+
+def test_stale_retry_does_not_repeat_errors(make_pam):
+    pam = make_pam(desk(1))
+    pam.save_current("desk")
+    pam.audio.down = True                      # an error on each pass, allowed by allow_missing
+    pam.display.fail_with[METHOD_TEMPORARY] = StaleSerialError("stale")
+    result = pam.apply("desk", allow_missing=True)
+    assert result.applied_display
+    assert len(result.errors) == 1 and "audio server" in result.errors[0]
+
+
+# ------------------------------------------------------------ display audio that appears late
+
+
+def tv_profile(make_pam):
+    """A profile with only the TV on and its HDMI audio; saved while both were present."""
+    pam = make_pam(reply([mon("DP-2", PROJECTOR), mon("HDMI-1", LENOVO)], [(0, 0, True, ["DP-2"])]),
+                   audio=FakeAudio(default_output=HDMI_OUT.name))
+    pam.save_current("tv")
+    pam.display.calls.clear()
+    pam.audio.set_calls.clear()
+    # Now the TV is connected but off, and its HDMI audio output is gone.
+    pam.display.set(reply([mon("DP-2", PROJECTOR), mon("HDMI-1", LENOVO)], [(0, 0, True, ["HDMI-1"])]))
+    pam.audio.state.outputs = [UNITEK_OUT]
+    pam.audio.state.default_output = UNITEK_OUT.name
+    return pam
+
+
+def test_hdmi_audio_that_appears_after_the_screen_turns_on_is_used(make_pam):
+    pam = tv_profile(make_pam)
+
+    def appear(n):
+        if pam.display.applied() and n >= 3:   # a little after the screens changed
+            pam.audio.state.outputs = [UNITEK_OUT, HDMI_OUT]
+    pam.audio.on_snapshot = appear
+    result = pam.apply("tv")
+    assert result.ok, result.summary_lines()
+    assert result.applied_display and ("output", HDMI_OUT.name) in pam.audio.set_calls
+    assert any("may appear" in n for n in result.notes)
+
+
+def test_hdmi_audio_that_never_appears_is_reported_not_replaced(make_pam):
+    pam = tv_profile(make_pam)
+    clock = iter(range(0, 1000))
+    pam._clock = lambda: next(clock)
+    result = pam.apply("tv")
+    assert result.applied_display and not result.applied_output
+    assert [c for c in pam.audio.set_calls if c[0] == "output"] == []
+    assert [p.kind for p in result.problems] == ["missing_output"]
+    assert "waited" in result.problems[0].message
+
+
+def test_missing_non_display_audio_still_refuses_before_any_change(make_pam):
+    pam = make_pam(reply([mon("DP-2", PROJECTOR), mon("HDMI-1", LENOVO)], [(0, 0, True, ["DP-2"])]))
+    pam.save_current("tv")                       # output: the USB adapter
+    pam.display.calls.clear()
+    pam.display.set(reply([mon("DP-2", PROJECTOR), mon("HDMI-1", LENOVO)], [(0, 0, True, ["HDMI-1"])]))
+    pam.audio.state.outputs = [HDMI_OUT]
+    result = pam.apply("tv")
+    assert result.refused and pam.display.calls == []
+
+
+def test_hdmi_audio_missing_while_screens_stay_on_refuses(make_pam):
+    pam = make_pam(desk(1), audio=FakeAudio(default_output=HDMI_OUT.name))
+    pam.save_current("desk")
+    pam.display.calls.clear()
+    pam.audio.state.outputs = [UNITEK_OUT]       # nothing is turned on, so it will not appear
+    result = pam.apply("desk")
+    assert result.refused and pam.display.calls == []

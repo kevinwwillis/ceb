@@ -112,9 +112,12 @@ class FakeAudio:
         self.set_calls = []
         self.down = False
         self.snapshots = 0
+        self.on_snapshot = None   # called with the snapshot number before each snapshot
 
     def snapshot(self):
         self.snapshots += 1
+        if self.on_snapshot:
+            self.on_snapshot(self.snapshots)
         if self.down:
             raise AudioError("could not connect to the audio server: connection refused")
         return AudioState(list(self.state.outputs), list(self.state.inputs),
@@ -133,9 +136,21 @@ class FakeAudio:
         self.state.default_input = name
 
 
+@pytest.fixture(autouse=True)
+def private_dirs(tmp_path, monkeypatch):
+    """Keep every test away from the real ~/.config/pam and $XDG_RUNTIME_DIR."""
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    return runtime
+
+
 @pytest.fixture
 def make_pam(tmp_path):
     def make(*replies, audio=None, gpus=None):
         display = FakeDisplay(*replies, gpus=gpus)
-        return Pam(display=display, audio=audio or FakeAudio(), store=Store(tmp_path / "pam"))
+        pam = Pam(display=display, audio=audio or FakeAudio(), store=Store(tmp_path / "pam"))
+        pam._sleep = lambda s: None   # no real waiting for audio devices
+        return pam
     return make
