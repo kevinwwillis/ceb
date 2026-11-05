@@ -163,8 +163,16 @@ def migrate_legacy_config(target: Path, legacy: Path) -> str | None:
     except OSError as e:
         shutil.rmtree(tmp, ignore_errors=True)
         raise StoreError(f"could not copy {legacy} to {target}: {e.strerror or e}") from e
-    return (f"PAM is now called CEB: copied {', '.join(files)} from {legacy} to {target}. "
-            f"CEB uses only {target} from now on; {legacy} was left as it was and can be deleted.")
+    old, new = _tilde(legacy), _tilde(target)
+    return (f"PAM is now called CEB: copied {', '.join(files)} from {old} to {new}. "
+            f"CEB uses only {new} from now on; {old} was left as it was and can be deleted.")
+
+
+def _tilde(path: Path) -> str:
+    """`path` with the home folder written as ~, for messages."""
+    home = os.path.expanduser("~")
+    text = str(path)
+    return "~" + text[len(home):] if home not in ("", "/") and (text == home or text.startswith(home + "/")) else text
 
 
 @dataclass

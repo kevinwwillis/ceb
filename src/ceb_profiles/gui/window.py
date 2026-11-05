@@ -24,7 +24,7 @@ from ..core import ApplyResult, Ceb, CebError, ProfileChanged  # noqa: E402
 from ..model import AudioRef, Profile, ScreenId  # noqa: E402
 from ..mutter import BUS_NAME, INTERFACE, OBJECT_PATH, DisplayError  # noqa: E402
 from ..store import Known, StoreError  # noqa: E402
-from . import editor  # noqa: E402
+from . import APP_ID, editor  # noqa: E402  (APP_ID: --demo runs as APP_ID.Demo, which has no icon)
 from .canvas import ArrangementCanvas, Item  # noqa: E402
 from .geometry import is_valid  # noqa: E402
 from .shortcuts import Shortcuts, ShortcutError  # noqa: E402
@@ -803,7 +803,7 @@ class CebWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _on_about(self) -> None:
-        about = Adw.AboutDialog(application_name="CEB", application_icon=self.get_application().get_application_id(),
+        about = Adw.AboutDialog(application_name="CEB", application_icon=APP_ID,
                                 developer_name="Kevin Willis", version=_version(),
                                 license_type=Gtk.License.MIT_X11,
                                 comments="Combined Environment Bundles: display and audio profiles for GNOME. A profile sets which screens are on, where they are, the primary screen, and the default audio output and input; switch with one key.")

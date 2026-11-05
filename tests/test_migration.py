@@ -208,3 +208,12 @@ def test_first_run_from_a_shortcut_notifies_once(make_ceb):
     notes = [(t, b) for t, b in n.sent if t == "Settings copied from PAM"]
     assert len(notes) == 1 and "PAM is now called CEB" in notes[0][1]
     assert n.critical[[t for t, _ in n.sent].index("Settings copied from PAM")] is False
+
+
+def test_message_writes_the_home_folder_as_tilde(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+    write_legacy()
+    store = Store()
+    store.load_profiles()
+    assert "from ~/.config/pam to ~/.config/ceb." in store.migration_notice
