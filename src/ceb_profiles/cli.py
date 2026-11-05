@@ -92,7 +92,10 @@ def main(argv=None, *, ceb: Ceb | None = None, notifier=desktop_notify, on_termi
         ceb = ceb or Ceb(store=Store(opts.config_dir))
         handler = {"list": cmd_list, "show": cmd_show, "save-current": cmd_save,
                    "apply": cmd_apply, "delete": cmd_delete}[opts.command]
-        return handler(ceb, opts, sink)
+        try:
+            return handler(ceb, opts, sink)
+        finally:
+            _migration_note(ceb, sink, on_terminal)
     except (CebError, StoreError) as e:
         return _fail(f"ceb {opts.command} failed", str(e), sink)
     except DisplayError as e:
@@ -102,6 +105,20 @@ def main(argv=None, *, ceb: Ceb | None = None, notifier=desktop_notify, on_termi
     except Exception as e:  # anything unexpected: still tell the user, with the type
         traceback.print_exc()
         return _fail(f"ceb {opts.command} failed", f"unexpected error: {type(e).__name__}: {e}", sink)
+
+
+def _migration_note(ceb: Ceb, notifier, on_terminal) -> None:
+    """Say once that the PAM-era files were copied (the copy itself happens only once). From a
+    keyboard shortcut (`apply` with notifications, no terminal) it is also a desktop notification."""
+    notice = getattr(ceb.store, "migration_notice", None)
+    if not notice:
+        return
+    ceb.store.migration_notice = None
+    terminal = sys.stderr.isatty() if on_terminal is None else on_terminal
+    if notifier and not terminal:
+        notifier("Settings copied from PAM", notice, critical=False)  # also prints to stderr
+    else:
+        print(f"ceb: note: {notice}", file=sys.stderr)
 
 
 def _usage_error(e: UsageError, args: list[str], notifier, on_terminal) -> int:

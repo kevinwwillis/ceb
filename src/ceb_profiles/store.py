@@ -9,6 +9,9 @@ shortcut running at the same moment cannot corrupt or lose each other's changes.
 symlink (dotfiles kept in a repo), the write goes to the file it points to and the link stays. A file
 that cannot be parsed, or holds values of the wrong type, is reported and never overwritten.
 
+The app was called PAM until 2026-11-05 and kept these files in $XDG_CONFIG_HOME/pam/. The first time
+the default folder is used and does not exist yet, they are copied over once (migrate_legacy_config).
+
 `last_seen` in known.json is kept to LAST_SEEN_RESOLUTION_S: seeing the same screens again does not
 rewrite the file unless something else changed or the stored time is older than that, so a keyboard
 shortcut does not write the history on every press.
@@ -20,6 +23,7 @@ import errno
 import fcntl
 import json
 import os
+import shutil
 import stat
 import tempfile
 from dataclasses import dataclass, field
@@ -72,9 +76,95 @@ def open_lock_file(path: str | os.PathLike):
     return os.fdopen(fd, "r+b")
 
 
+def _config_home() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config"))
+
+
 def default_config_dir() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    return Path(base) / "ceb"
+    return _config_home() / "ceb"
+
+
+def legacy_config_dir() -> Path:
+    """Where the app kept its files while it was called PAM (renamed to CEB, 2026-11-05)."""
+    return _config_home() / "pam"
+
+
+DATA_FILES = ("profiles.json", "known.json")
+# The key each file must hold, besides an integer "version", to count as this app's file.
+_DATA_KEYS = {"profiles.json": "profiles", "known.json": "screens"}
+
+
+def _legacy_files(legacy: Path) -> list[str]:
+    """The data files in `legacy` if every one there is this app's (PAM's) format; else []. A file
+    counts as ours when it is a JSON object with an integer "version" no newer than ours, the key
+    our format always writes ("profiles" or "screens") as a list, and it loads without error."""
+    if not legacy.is_dir():
+        return []
+    present = [name for name in DATA_FILES if (legacy / name).is_file()]
+    probe = Store(legacy)  # an explicit directory: never migrates itself
+    for name in present:
+        try:
+            data = probe._read(legacy / name)
+        except StoreError:
+            return []
+        version = data.get("version") if data is not None else None
+        if (data is None or not isinstance(version, int) or isinstance(version, bool)
+                or not isinstance(data.get(_DATA_KEYS[name]), list)):
+            return []
+    try:
+        if "profiles.json" in present:
+            probe.load_profiles()
+        if "known.json" in present:
+            probe.load_known()
+    except StoreError:
+        return []
+    return present
+
+
+def migrate_legacy_config(target: Path, legacy: Path) -> str | None:
+    """One-time copy of the PAM-era files into CEB's folder. Runs only when `target` does not exist
+    and `legacy` holds this app's files (see _legacy_files); a `legacy` folder that is not ours is
+    never touched. The files are copied, not moved: the old folder stays as it was, as a backup and
+    for an older PAM install, and can be deleted by hand. A file that is a symlink (dotfiles kept in
+    a repo) becomes a symlink to the same file, so writes keep going there.
+
+    The copy is built in a temporary folder next to `target` and renamed into place, so a failure
+    leaves no half-filled `target` and the next run tries again; if another process created
+    `target` meanwhile, its folder wins. Returns the message to show once, or None if nothing was
+    copied. Raises StoreError if the copy fails."""
+    if os.path.lexists(target):
+        return None
+    files = _legacy_files(legacy)
+    if not files:
+        return None
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(prefix=f".{target.name}.migrating-", dir=target.parent))
+    except OSError as e:
+        raise StoreError(f"could not copy {legacy} to {target}: {e.strerror or e}") from e
+    try:
+        with contextlib.suppress(OSError):
+            os.chmod(tmp, stat.S_IMODE(os.stat(legacy).st_mode))
+        for name in files:
+            src = legacy / name
+            if src.is_symlink():
+                os.symlink(os.path.realpath(src), tmp / name)
+            else:
+                shutil.copy2(src, tmp / name)
+                with open(tmp / name, "rb") as f:
+                    os.fsync(f.fileno())
+        try:
+            os.rename(tmp, target)  # fails if another process created a non-empty target meanwhile
+        except OSError as e:
+            if e.errno in (errno.EEXIST, errno.ENOTEMPTY) or os.path.lexists(target):
+                shutil.rmtree(tmp, ignore_errors=True)
+                return None
+            raise
+    except OSError as e:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise StoreError(f"could not copy {legacy} to {target}: {e.strerror or e}") from e
+    return (f"PAM is now called CEB: copied {', '.join(files)} from {legacy} to {target}. "
+            f"CEB uses only {target} from now on; {legacy} was left as it was and can be deleted.")
 
 
 @dataclass
@@ -249,6 +339,19 @@ _INVALID = (KeyError, TypeError, ValueError, AttributeError)  # what a hand-edit
 class Store:
     def __init__(self, config_dir: str | os.PathLike | None = None):
         self.dir = Path(config_dir) if config_dir else default_config_dir()
+        # The PAM-era folder is copied over only for the default folder, before the first read or
+        # write (migrate_legacy_config). An explicit config_dir is used as given.
+        self._legacy_dir = None if config_dir else legacy_config_dir()
+        # The message to show once when that copy happened, else None.
+        self.migration_notice: str | None = None
+
+    def _migrate_once(self) -> None:
+        if self._legacy_dir is None:
+            return
+        notice = migrate_legacy_config(self.dir, self._legacy_dir)  # raises StoreError: try again next time
+        self._legacy_dir = None
+        if notice:
+            self.migration_notice = notice
 
     @property
     def profiles_path(self) -> Path:
@@ -261,6 +364,7 @@ class Store:
     @contextlib.contextmanager
     def locked(self):
         """Hold the store lock for a read-modify-write."""
+        self._migrate_once()
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -273,6 +377,7 @@ class Store:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
     def _read(self, path: Path) -> dict | None:
+        self._migrate_once()
         try:
             text = path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -296,6 +401,7 @@ class Store:
         """Atomic write. A symlinked file is written through: the temporary file goes next to the
         link's target and replaces the target, so the link stays a link. OSError is raised as
         StoreError."""
+        self._migrate_once()
         try:
             self._write_atomic(path, data)
         except OSError as e:

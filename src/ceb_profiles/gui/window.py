@@ -308,6 +308,10 @@ class CebWindow(Adw.ApplicationWindow):
         if not self.shortcuts.available:
             problems.append("GNOME's shortcut settings are not installed; keyboard shortcuts are off")
         self._show_problems(problems)
+        notice = getattr(self.ceb.store, "migration_notice", None)
+        if notice:  # the PAM-era files were just copied over; said once (docs/behavior.md, Files)
+            self.ceb.store.migration_notice = None
+            GLib.idle_add(lambda: self.error("Settings Copied from PAM", notice) and False)
         names = [p.name for p in self.profiles]
         if select in names:
             self.current = select
