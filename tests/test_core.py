@@ -161,6 +161,18 @@ def test_nothing_left_to_show_never_applies(make_pam):
     assert any(p.kind == "no_screens" for p in result.problems)
 
 
+def test_layout_mode_mismatch_blocks_even_with_allow_missing(make_pam):
+    pam = make_pam(desk(1))
+    pam.save_current("desk")
+    r = desk(2)
+    pam.display.set((r[0], r[1], r[2], {"layout-mode": 2, "supports-changing-layout-mode": False}))
+    for dry_run in (True, False):
+        result = pam.apply("desk", allow_missing=True, dry_run=dry_run)
+        assert not result.goes_ahead and result.refused
+        assert pam.display.calls == []
+        assert [p.kind for p in result.problems] == ["layout_mode"]
+
+
 def test_missing_mode_refuses(make_pam):
     pam = make_pam(desk(1))
     pam.save_current("desk")
