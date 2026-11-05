@@ -63,17 +63,45 @@ def is_valid(rects: list[Rect]) -> bool:
 
 
 def snap(x: float, y: float, w: int, h: int, others: list[Rect], distance: int = SNAP_DISTANCE) -> tuple[int, int]:
-    """Snap a screen being dragged to its neighbours' edges (the mockup's rule): its left edge to a
-    neighbour's right or left edge, its right edge to a neighbour's left edge; its top edge to a
-    neighbour's top or bottom edge, its bottom edge to a neighbour's top edge."""
-    for o in others:
-        for a, b in ((x, o.x2), (x + w, o.x), (x, o.x)):
-            if abs(a - b) < distance:
-                x += b - a
-        for a, b in ((y, o.y), (y, o.y2), (y + h, o.y)):
-            if abs(a - b) < distance:
-                y += b - a
+    """Snap a screen being dragged to its neighbours' edges. Horizontally: its left edge to a
+    neighbour's right or left edge, its right edge to a neighbour's left or right edge (side by side,
+    or aligned left or right). Vertically the same with top and bottom. On each axis the nearest
+    edge pair within `distance` wins; the mockup also had the first four pairs, but applied every
+    pair in turn, and had no right/right or bottom/bottom alignment."""
+    def nearest(pos: float, size: int, pairs) -> float:
+        best = None
+        for a, b in pairs:
+            d = b - a
+            if abs(d) < distance and (best is None or abs(d) < abs(best)):
+                best = d
+        return pos + (best or 0)
+
+    x = nearest(x, w, [(a, b) for o in others
+                       for a, b in ((x, o.x2), (x + w, o.x), (x, o.x), (x + w, o.x2))])
+    y = nearest(y, h, [(a, b) for o in others
+                       for a, b in ((y, o.y), (y, o.y2), (y + h, o.y), (y + h, o.y2))])
     return round(x), round(y)
+
+
+NUDGE_STEP = 100     # layout pixels per step when moving a screen with the keyboard
+NUDGE_MAX_STEPS = 200
+
+
+def nudge(rects: list[Rect], index: int, dx: int, dy: int, step: int = NUDGE_STEP) -> list[Rect] | None:
+    """Move rects[index] one step in direction (dx, dy) (each -1, 0 or 1) as a drag would: the
+    first position in that direction, `step` by `step`, that after snapping still moves that way
+    and gives a layout GNOME accepts. None when there is no such place (e.g. moving a screen away
+    from the only screen it touches)."""
+    r = rects[index]
+    others = [o for i, o in enumerate(rects) if i != index]
+    for k in range(1, NUDGE_MAX_STEPS + 1):
+        x, y = snap(r.x + dx * k * step, r.y + dy * k * step, r.w, r.h, others)
+        if (x - r.x) * dx <= 0 and dx or (y - r.y) * dy <= 0 and dy:
+            continue  # snapped back or sideways only
+        trial = rects[:index] + [r.moved(x, y)] + rects[index + 1:]
+        if is_valid(trial):
+            return trial
+    return None
 
 
 def settle(rects: list[Rect], index: int, fallback: Rect) -> tuple[list[Rect], bool]:

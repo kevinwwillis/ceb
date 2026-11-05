@@ -1,7 +1,7 @@
 """The GUI's pure logic: snapping, settling a dropped screen, editing a profile, screen names."""
 from conftest import LENOVO, PROJECTOR, ROG, desk, mon, reply
 from pam_profiles.gui import editor
-from pam_profiles.gui.geometry import Rect, adjacent, close_gap, is_valid, settle, snap
+from pam_profiles.gui.geometry import Rect, adjacent, close_gap, is_valid, nudge, settle, snap
 from pam_profiles.model import Identity, ModeSpec
 
 HD = (1920, 1080)
@@ -34,6 +34,29 @@ def test_snap_pulls_to_neighbour_edges():
     assert snap(1950, 40, *HD, others) == (1920, 0)     # left edge to right edge, top to top
     assert snap(-1900, 1100, *HD, others) == (-1920, 1080)  # right edge to left edge, top to bottom
     assert snap(2400, 600, *HD, others) == (2400, 600)  # too far: unchanged
+
+
+def test_snap_aligns_bottom_edges_and_right_edges():
+    tall = [r(0, 0, 1920, 1200)]
+    assert snap(1920, 150, *HD, tall) == (1920, 120)        # bottom to bottom (1200)
+    wide = [r(0, 0, 2560, 1440)]
+    assert snap(700, 1440, *HD, wide) == (640, 1440)       # right to right (2560)
+
+
+def test_snap_takes_the_nearest_edge_pair():
+    # 15 px from left-aligned, 5 px from right-aligned: right-aligned wins.
+    assert snap(15, 0, 1900, 1080, [r(0, 1080)]) == (20, 0)
+
+
+def test_nudge_moves_by_steps_and_stays_valid():
+    rects = [r(0, 0), r(1920, 0)]
+    down = nudge(rects, 1, 0, 1)
+    assert down is not None and is_valid(down) and down[1].y == 200 and down[1].x == 1920
+    assert nudge(rects, 1, 1, 0) is None              # away from its only neighbour: no place
+    rects = [r(0, 0), r(1920, 0), r(3840, 0)]
+    moved = nudge(rects, 0, 1, 0)                     # left screen moves right: past the others
+    assert moved is not None and is_valid(moved) and moved[0].x > 0
+    assert nudge([r(0, 0), r(1920, 900)], 1, 0, 1) is None  # further down only the corner touches
 
 
 def test_settle_keeps_a_valid_drop():
