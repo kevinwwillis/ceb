@@ -103,6 +103,31 @@ device not present):
   changed, so `ceb apply` says "only partly applied" and exits 1, or 3 with `--allow-missing`).
   Another device is never used in its place. Any other missing device refuses as above.
 
+## The window: saving, switching and testing
+
+- Editing a profile in the window (dragging or adding screens, turning one off, the primary screen,
+  audio output and input, the keyboard shortcut) never changes the live screens or audio, and
+  nothing is written until Save. The edits are kept in memory per profile, with Undo and Redo,
+  until Save or Discard. A reload (a screen or audio device plugged in) keeps them.
+- Save writes the profile only if `profiles.json` still holds the version the edits started from;
+  if it was changed meanwhile, the window asks whether to replace it or discard the edits. The
+  shortcut is written to GNOME after the profile; if that fails, the profile stays saved and the
+  shortcut stays an unsaved edit. A profile that holds screens not connected now saves like any
+  other.
+- Only three things change the live screens and audio: "Switch to profile" (the saved profile,
+  exactly what its keyboard shortcut and `ceb apply` do; unsaved edits are not used), the keyboard
+  shortcut, and Test.
+- Test reads what is on now (screens, default output and input) first; if the screens cannot be
+  read, nothing is applied. It then applies the profile as shown, unsaved edits included, in the
+  same way as a switch (verify, then temporary). After the test length it applies what was on
+  before, skipping anything that went away meanwhile (`allow_missing`), unless Keep was pressed. The
+  countdown runs in the window's main loop and needs no click, so it goes back even when the tested
+  layout leaves the window on a screen that is now off. Closing the window during a test goes back
+  first, then closes. A profile switch from a keyboard shortcut during a test is undone when the
+  test goes back.
+- The test length is one setting for all profiles: `settings.json` in the config folder,
+  `{"version": 1, "test_seconds": 15}`, 15 s when there is none, kept between 3 and 600 s.
+
 ## Desktop notifications
 
 `ceb apply` reports every failure through `org.freedesktop.Notifications` (D-Bus, through Gio),
@@ -125,8 +150,8 @@ libpulse) to read and set the default sink and source through pipewire-pulse:
 
 ## Files
 
-`$XDG_CONFIG_HOME/ceb/` (default `~/.config/ceb/`): `profiles.json` and `known.json`, both
-`{"version": 1, ...}`. Writes are atomic and locked. A file CEB cannot parse, one with values of the
+`$XDG_CONFIG_HOME/ceb/` (default `~/.config/ceb/`): `profiles.json`, `known.json` and the window's
+`settings.json`, all `{"version": 1, ...}`. Writes are atomic and locked. A file CEB cannot parse, one with values of the
 wrong type, or one written by a newer CEB, is reported and never overwritten. If either file is a
 symlink, CEB writes to the file it points to and the link stays. If `profiles.json` holds two
 profiles with the same name (only possible by editing it by hand), CEB uses the first one and the

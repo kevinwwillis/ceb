@@ -159,6 +159,18 @@ class Ceb:
             profile.audio_input = _ref(audio_state.inputs, audio_state.default_input)
         return profile
 
+    def live_profile(self, name: str = "before the test") -> Profile:
+        """What is on now (screens, default audio output and input) as a profile that is not
+        stored, so it can be applied again later (the window's Test goes back to it). If the audio
+        devices cannot be read, the profile leaves audio unchanged. Raises DisplayError or
+        CebError when the screens cannot be read."""
+        display_state = self.display.get_state()
+        try:
+            audio_state = self.audio.snapshot()
+        except AudioError:
+            audio_state = None
+        return self.capture(name, display_state, audio_state, include_audio=audio_state is not None)
+
     def save_current(self, name: str, *, overwrite: bool = False, include_audio: bool = True) -> Profile:
         name = name.strip()
         if not name:
@@ -256,7 +268,13 @@ class Ceb:
         Screens are applied before audio. A display-audio device (HDMI/DisplayPort) that is missing
         while the profile turns a screen on is waited for after the screens change (up to
         audio_appear_wait_s); if it does not appear it is reported, never replaced."""
-        profile = self.profile(name)
+        return self.apply_profile(self.profile(name), dry_run=dry_run, allow_missing=allow_missing)
+
+    def apply_profile(self, profile: Profile, *, dry_run: bool = False,
+                      allow_missing: bool = False) -> ApplyResult:
+        """apply(), for a profile that is not (or not as it is) in profiles.json: the window's Test
+        (the profile as edited, saved or not) and going back after a test (live_profile())."""
+        name = profile.name
         result = ApplyResult(profile=name, dry_run=dry_run, allow_missing=allow_missing)
         lock = None
         if not dry_run:

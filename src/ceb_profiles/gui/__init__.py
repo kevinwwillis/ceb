@@ -1,7 +1,7 @@
 """CEB's GTK 4 + libadwaita window. Run with `ceb-gui` or `ceb gui`.
 
   ceb-gui                 the real thing: GNOME's screens, the audio server, GNOME's shortcuts
-  ceb-gui --dry-run       Apply only asks GNOME to check the layout (ApplyMonitorsConfig method 0);
+  ceb-gui --dry-run       Switch and Test only ask GNOME to check the layout (ApplyMonitorsConfig method 0);
                           nothing on screen or in audio changes
   ceb-gui --demo          example screens and audio devices, a throwaway profile store and in-memory
                           shortcuts; touches nothing real (for screenshots and development)
@@ -65,7 +65,7 @@ def _adw_version():
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="ceb-gui", description="CEB (Combined Environment Bundles): display and audio profiles for GNOME")
     ap.add_argument("--dry-run", action="store_true",
-                    help="Apply only asks GNOME to verify the layout; nothing is changed")
+                    help="Switch and Test only ask GNOME to verify the layout; nothing is changed")
     ap.add_argument("--demo", action="store_true",
                     help="example screens and audio, throwaway store, in-memory shortcuts; touches nothing real")
     ap.add_argument("--size", help=argparse.SUPPRESS)  # WIDTHxHEIGHT, for screenshots

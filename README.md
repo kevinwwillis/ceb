@@ -61,7 +61,7 @@ shortcut (or `ceb apply <profile>`) to apply it again.
 
 If something the profile needs is missing (a screen not connected, an audio device not present),
 nothing is changed and you are told what is missing; you can then apply the rest (the window's
-"Apply the Rest", or `ceb apply --allow-missing`).
+"Apply the Rest" or "Test the Rest", or `ceb apply --allow-missing`).
 
 ## When screens and audio devices are remembered
 
@@ -76,7 +76,7 @@ which records every change as it happens. Turning it off removes the entry and s
 
 ```bash
 ceb-gui                 # or: ceb gui, or CEB in the applications menu
-ceb-gui --dry-run       # Apply only asks GNOME to check the layout; nothing changes
+ceb-gui --dry-run       # Switch and Test only ask GNOME to check the layout; nothing changes
 ceb-gui --demo          # example screens and audio, throwaway store, in-memory shortcuts
 ```
 
@@ -84,14 +84,33 @@ Profiles are listed on the left with their keyboard shortcut. For the selected p
 screens (they snap to each other's edges; a screen dropped where GNOME would refuse it moves to the
 nearest place GNOME accepts), add screens that are connected or remembered, make one primary or
 turn it off, pick the audio output and input ("Leave unchanged" keeps whatever is set), and set a
-keyboard shortcut. Every change is saved at once; Apply switches to the profile. If the profile was
-changed outside the window meanwhile (for example `ceb save-current --force`), the window shows the
-newer version instead of overwriting it.
+keyboard shortcut. A profile may hold screens that are not connected now.
+
+Editing never changes your screens or audio. The bar along the bottom of the profile says whether
+there are unsaved changes, and holds:
+
+- **Undo** and **Redo** for the changes made since the last Save or Discard;
+- **Discard** and **Save**: nothing is written until you press Save (this includes the keyboard
+  shortcut). Opening another profile, making a new one, renaming, or closing the window with
+  unsaved changes asks first: Save, Discard or Cancel. If the profile was changed outside the window
+  meanwhile (for example `ceb save-current --force`), Save asks whether to replace it or discard your
+  changes and show the newer one;
+- **Test** with its length in seconds: switches to the profile as shown (unsaved changes included)
+  and goes back to the screens and audio you had before after that many seconds, unless you press
+  **Keep**; **Go back now** goes back at once. The length (15 s at first) is one setting for every
+  profile, kept in `settings.json` next to the profiles. Closing the window during a test goes back
+  first;
+- **Switch to profile**: switches the screens and audio to the saved profile, as its keyboard shortcut
+  does. Unsaved changes are not used; save them first to switch to them.
+
+Switching and testing say what is missing when the profile needs a screen or audio device that is
+not connected, and offer to apply or test the rest.
 
 Keyboard: in the profile list, Tab and the arrow keys move the focus and Enter or Space opens the
 profile. In the arrangement, the arrow keys select the next or previous screen and Ctrl+arrow keys
-move the selected screen one step, snapping like a drag, to the next place GNOME accepts. Ctrl+Return
-applies, Ctrl+N saves the current screens as a new profile.
+move the selected screen one step, snapping like a drag, to the next place GNOME accepts. Ctrl+S
+saves, Ctrl+Z undoes, Ctrl+Shift+Z (or Ctrl+Y) redoes, Ctrl+Return switches to the saved profile,
+Ctrl+N saves the current screens as a new profile.
 
 Screens that mirror each other are one box with "+ N" in its name; each screen of the group is listed
 under "Selected screen", so it can be turned off on its own. Main menu > Remembered Devices lists the
@@ -160,6 +179,8 @@ state, audio, errors = ceb.current()      # connected screens and audio devices,
 known = ceb.known()                       # every screen and audio device ever seen
 ceb.save_current("desk")
 result = ceb.apply("desk", dry_run=True)  # ApplyResult: problems, errors, display_plan, audio_plan
+before = ceb.live_profile()               # what is on now, as a profile that is not stored
+ceb.apply_profile(before)                 # apply a profile object (the window's Test goes back this way)
 ceb.rename_profile("desk", "office")      # keeps its place in the list
 ceb.forget_screen(known.screens[0].screen)  # drop a screen from the history (forget_audio too)
 ```
