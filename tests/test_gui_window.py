@@ -1,6 +1,7 @@
 """The window with the demo backends. Needs a display: run under GTK's Broadway backend, e.g.
     gtk4-broadwayd :7 &  GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 pytest tests/test_gui_window.py
-Skipped when GTK cannot open a display."""
+Skipped unless GDK_BACKEND=broadway (so they never open anything on a real desktop), or when GTK
+cannot open the display."""
 import os
 import time
 
@@ -13,6 +14,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
+if os.environ.get("GDK_BACKEND") != "broadway":  # never open windows on a real desktop session
+    pytest.skip("window tests run only under GDK_BACKEND=broadway", allow_module_level=True)
 if not Gtk.init_check() or Gdk.Display.get_default() is None:
     pytest.skip("no display for GTK", allow_module_level=True)
 
