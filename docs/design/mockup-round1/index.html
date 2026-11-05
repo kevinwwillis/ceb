@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PAM main window — 3 mockups</title>
+<style>
+:root{--bg:#1d1d20;--win:#242424;--side:#2e2e32;--card:#363639;--line:#ffffff1a;--fg:#ffffffde;--dim:#ffffff8c;--acc:#3584e4;--ok:#2ec27e}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px Cantarell,"Noto Sans",system-ui,sans-serif;padding:16px}
+h1{font-size:20px;margin:0 0 4px}.lead{color:var(--dim);margin:0 0 18px;max-width:1100px}
+section[data-piece]>h2{font-size:17px;margin:8px 0 4px}.why{color:var(--dim);margin:0 0 14px}
+[data-option]{margin:0 0 34px}.optlabel{font-weight:700;margin:0 0 8px}
+.win{background:var(--win);border:1px solid #000;border-radius:12px;overflow:hidden;box-shadow:0 10px 30px #0008;height:640px;display:flex;flex-direction:column;width:100%}
+.hb{height:46px;flex:none;display:flex;align-items:center;gap:8px;padding:0 10px;background:#303030;border-bottom:1px solid #0006}
+.hb .t{flex:1;text-align:center;font-weight:700}.btn{background:#ffffff1a;border:0;color:var(--fg);border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer}
+.btn.sug{background:var(--acc);color:#fff}.btn.flat{background:none}.btn:hover{filter:brightness(1.2)}
+.body{flex:1;display:flex;min-height:0}
+.side{width:260px;flex:none;background:var(--side);border-right:1px solid #0005;padding:8px;overflow:auto}
+.row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer}.row:hover{background:#ffffff0d}
+.row.on{background:#ffffff1f}.row .k{margin-left:auto;color:var(--dim);font-size:12px;font-family:monospace}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:auto;padding:14px;gap:14px}
+.canvas{position:relative;background:#1a1a1c;border-radius:12px;min-height:260px;flex:1;overflow:hidden;touch-action:none}
+.scr{position:absolute;background:#3a4a63;border:2px solid #6b85b3;border-radius:6px;cursor:grab;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;font-size:12px;padding:4px;user-select:none;overflow:hidden}
+.scr span{color:var(--dim);font-size:11px}.scr.sel{border-color:#fff;box-shadow:0 0 0 3px var(--acc)}
+.scr.gone{background:repeating-linear-gradient(45deg,#333 0 8px,#2b2b2b 8px 16px);border-style:dashed;border-color:#888}
+.star{font-style:normal;color:#f6d32d;font-size:11px}.empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim)}
+.group{background:var(--card);border-radius:12px;overflow:hidden}.group>.gt{font-weight:700;color:var(--dim);font-size:13px;padding:10px 14px 0}
+.pr{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line);min-height:50px}.pr:last-child{border:0}
+.pr .l{flex:1;min-width:0}.pr .l small{display:block;color:var(--dim)}
+select{background:#ffffff14;color:var(--fg);border:0;border-radius:6px;padding:6px 8px;font:inherit;max-width:100%}
+.dot{width:9px;height:9px;border-radius:50%;flex:none}.dot.c{background:var(--ok)}.dot.g{background:#777}
+.kbd{font-family:monospace;background:#ffffff14;border-radius:5px;padding:4px 8px}
+.tray{display:flex;gap:10px;flex-wrap:wrap}.chip{display:flex;align-items:center;gap:8px;background:var(--card);border-radius:10px;padding:8px 12px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;padding:16px;overflow:auto;flex:1}
+.pcard{background:var(--card);border-radius:12px;padding:12px;cursor:pointer;border:2px solid transparent}.pcard.on{border-color:var(--acc)}
+.mini{height:90px;background:#1a1a1c;border-radius:8px;position:relative;margin-bottom:10px}.mini i{position:absolute;background:#3a4a63;border:1px solid #6b85b3;border-radius:3px}
+.pcard small{color:var(--dim);display:block;margin-top:4px}
+.lib{width:250px;flex:none;background:var(--side);padding:10px;overflow:auto;border-right:1px solid #0005}.lib h3,.insp h3{font-size:13px;color:var(--dim);margin:6px 4px 8px}
+.insp{width:280px;flex:none;background:var(--side);padding:10px;overflow:auto;border-left:1px solid #0005}
+.bottom{flex:none;display:flex;gap:16px;align-items:center;padding:10px 14px;background:#2a2a2d;border-top:1px solid #0006;flex-wrap:wrap}
+.sheet{position:absolute;inset:40px 60px;background:var(--win);border-radius:14px;box-shadow:0 20px 60px #000c;display:flex;flex-direction:column;overflow:hidden}
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,80px);background:#353535;color:#fff;padding:10px 18px;border-radius:20px;transition:.25s;z-index:99}#toast.on{transform:translate(-50%,0)}
+@media (max-width:760px){.body{flex-direction:column}.side,.lib,.insp{width:auto;max-height:170px;border:0;border-bottom:1px solid #0005}.win{height:auto;min-height:640px}.main{min-height:420px}.sheet{inset:10px}}
+</style></head><body>
+<h1>PAM main window — 3 mockups</h1>
+<p class="lead">PAM is the display + audio profile app (TASK-1). Each option below is the same app window with your real screens and audio devices; only the layout differs. Everything works: pick a profile, drag screens (they snap), change audio, add or remove screens. The projector is shown as <b>not connected</b> to illustrate remembered screens (it is connected right now). Changes are shared between the three options.</p>
+
+<section data-piece="window">
+<h2>1. Main window layout</h2>
+<p class="why">What it's for: where profiles, the screen arrangement, audio and shortcuts live. What differs: how the window is organized.</p>
+
+<div data-option="A" data-label="A: Settings-style sidebar">
+ <p class="optlabel">A — Settings-style: profile list on the left, everything for the selected profile on the right (like GNOME Settings)</p>
+ <div class="win"><div class="hb"><button class="btn flat">＋</button><div class="t">PAM</div><button class="btn sug" onclick="applyProfile()">Apply</button></div>
+  <div class="body"><div class="side" id="a-side"></div>
+   <div class="main"><div id="a-canvas" style="min-height:240px"></div>
+    <div class="group"><div class="gt">Other screens</div><div class="pr"><div class="tray" id="a-tray"></div></div></div>
+    <div class="group" id="a-groups"></div></div></div></div>
+</div>
+
+<div data-option="B" data-label="B: Canvas-first editor">
+ <p class="optlabel">B — Canvas-first: profile picker in the header, a big arrangement canvas, a library of every screen ever seen on the left, details of the selected screen on the right, audio in a bottom bar</p>
+ <div class="win"><div class="hb"><select id="b-prof"></select><span class="kbd" id="b-key"></span><div class="t">PAM</div><button class="btn sug" onclick="applyProfile()">Apply</button></div>
+  <div class="body"><div class="lib"><h3>All screens seen</h3><div id="b-lib"></div></div>
+   <div class="main" style="padding:10px"><div id="b-canvas"></div></div>
+   <div class="insp"><h3>Selected screen</h3><div id="b-insp"></div></div></div>
+  <div class="bottom" id="b-bottom"></div></div>
+</div>
+
+<div data-option="C" data-label="C: Profile cards + editor sheet">
+ <p class="optlabel">C — Profile cards: one card per profile with a mini preview, audio and shortcut; click Edit to open the full editor on top</p>
+ <div class="win" style="position:relative"><div class="hb"><button class="btn flat">＋ New profile</button><div class="t">PAM</div><span></span></div>
+  <div class="cards" id="c-cards"></div>
+  <div class="sheet" id="c-sheet" style="display:none"><div class="hb"><button class="btn flat" onclick="cSheet(false)">Done</button><div class="t" id="c-title"></div><button class="btn sug" onclick="applyProfile()">Apply</button></div>
+   <div class="main"><div id="c-canvas" style="min-height:220px"></div><div class="group" id="c-groups"></div></div></div></div>
+</div>
+</section>
+
+<script src="pam.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+function audioRows(host) {
+  host.innerHTML = '<div class="gt">Audio for this profile</div>';
+  for (const [lab, list, f] of [["Output", OUTPUTS, "out"], ["Input", INPUTS, "inp"]]) {
+    const r = document.createElement("div"); r.className = "pr"; r.innerHTML = `<div class="l">${lab}</div>`;
+    r.append(selectEl(list, P()[f], (v) => { P()[f] = v; emit(); toast(`${lab} set for “${P().name}”`); })); host.append(r);
+  }
+  const k = document.createElement("div"); k.className = "pr";
+  k.innerHTML = `<div class="l">Keyboard shortcut<small>Switches to this profile from anywhere</small></div><span class="kbd">${P().key}</span><button class="btn">Change</button>`;
+  host.append(k);
+  const sel = state.selected, S = SCREENS[sel];
+  if (sel && P().layout[sel]) {
+    const s = document.createElement("div"); s.className = "pr";
+    s.innerHTML = `<div class="l">${S.name}<small>${S.sub}</small></div>`;
+    const pb = document.createElement("button"); pb.className = "btn"; pb.textContent = P().primary === sel ? "★ Primary" : "Make primary";
+    pb.onclick = () => { P().primary = sel; emit(); };
+    const rm = document.createElement("button"); rm.className = "btn"; rm.textContent = "Turn off in profile"; rm.onclick = () => toggleScreen(sel);
+    s.append(pb, rm); host.prepend(s); host.prepend(Object.assign(document.createElement("div"), { className: "gt", textContent: "Selected screen" }));
+  }
+}
+function tray(host) {
+  host.innerHTML = "";
+  const u = unusedScreens();
+  if (!u.length) host.innerHTML = '<span style="color:var(--dim)">Every known screen is in this profile</span>';
+  for (const k of u) {
+    const c = document.createElement("div"), S = SCREENS[k]; c.className = "chip";
+    c.innerHTML = `<span class="dot ${S.connected ? "c" : "g"}"></span><div>${S.name}<br><small style="color:var(--dim)">${S.connected ? "connected" : "remembered · not connected"}</small></div>`;
+    const b = document.createElement("button"); b.className = "btn"; b.textContent = "Add"; b.onclick = () => toggleScreen(k); c.append(b); host.append(c);
+  }
+}
+// A
+function drawA() {
+  $("a-side").innerHTML = "";
+  PROFILES.forEach((p, i) => { const r = document.createElement("div"); r.className = "row" + (i === state.profile ? " on" : "");
+    r.innerHTML = `<span>${p.name}</span><span class="k">${p.key}</span>`; r.onclick = () => selectProfile(i); $("a-side").append(r); });
+  tray($("a-tray")); audioRows($("a-groups"));
+}
+// B
+function drawB() {
+  const s = $("b-prof"); s.innerHTML = ""; PROFILES.forEach((p, i) => s.append(new Option(p.name, i, false, i === state.profile)));
+  s.onchange = () => selectProfile(+s.value); $("b-key").textContent = P().key;
+  $("b-lib").innerHTML = "";
+  for (const k in SCREENS) { const S = SCREENS[k], inP = !!P().layout[k], r = document.createElement("div");
+    r.className = "row" + (k === state.selected ? " on" : "");
+    r.innerHTML = `<span class="dot ${S.connected ? "c" : "g"}"></span><div>${S.name}<br><small style="color:var(--dim)">${S.connected ? "connected" : "not connected"}${inP ? " · in profile" : ""}</small></div>`;
+    const b = document.createElement("button"); b.className = "btn"; b.style.marginLeft = "auto"; b.textContent = inP ? "−" : "＋";
+    b.onclick = (e) => { e.stopPropagation(); toggleScreen(k); }; r.append(b); r.onclick = () => { state.selected = k; emit(); }; $("b-lib").append(r); }
+  const sel = state.selected, S = SCREENS[sel], inP = !!P().layout[sel];
+  $("b-insp").innerHTML = sel ? `<div class="group"><div class="pr"><div class="l">${S.name}<small>${S.sub}</small></div></div>
+   <div class="pr"><div class="l">In this profile</div><span>${inP ? "On" : "Off"}</span></div>
+   <div class="pr"><div class="l">Resolution</div><select><option>1920×1080</option><option>1680×1050</option></select></div>
+   <div class="pr"><div class="l">Refresh</div><select><option>60 Hz</option><option>50 Hz</option></select></div>
+   <div class="pr"><div class="l">Primary</div><span>${P().primary === sel ? "★ yes" : "no"}</span></div></div>` : "";
+  const bb = $("b-bottom"); bb.innerHTML = "<b>Audio</b>";
+  for (const [lab, list, f] of [["Output", OUTPUTS, "out"], ["Input", INPUTS, "inp"]]) {
+    bb.append(lab); bb.append(selectEl(list, P()[f], (v) => { P()[f] = v; emit(); toast(`${lab} set for “${P().name}”`); })); }
+}
+// C
+function mini(p) { const ids = Object.keys(p.layout); if (!ids.length) return "";
+  const xs = ids.map((k) => p.layout[k][0]), mx = Math.max(...xs) + 1920, s = Math.min(230 / mx, 70 / 1080);
+  const off = (230 - mx * s) / 2 + 5;
+  return ids.map((k) => `<i style="left:${off + p.layout[k][0] * s}px;top:${10 + p.layout[k][1] * s}px;width:${1920 * s}px;height:${1080 * s}px"></i>`).join(""); }
+function drawC() {
+  $("c-cards").innerHTML = "";
+  PROFILES.forEach((p, i) => { const c = document.createElement("div"); c.className = "pcard" + (i === state.profile ? " on" : "");
+    c.innerHTML = `<div class="mini">${mini(p)}</div><b>${p.name}</b> <span class="kbd" style="float:right">${p.key}</span>
+     <small>🔊 ${OUTPUTS[p.out]}</small><small>🎤 ${INPUTS[p.inp]}</small>
+     <div style="display:flex;gap:8px;margin-top:10px"><button class="btn sug">Apply</button><button class="btn">Edit</button></div>`;
+    const [ap, ed] = c.querySelectorAll("button");
+    ap.onclick = (e) => { e.stopPropagation(); state.profile = i; applyProfile(); emit(); };
+    ed.onclick = (e) => { e.stopPropagation(); selectProfile(i); cSheet(true); };
+    c.onclick = () => selectProfile(i); $("c-cards").append(c); });
+  $("c-title").textContent = P().name; audioRows($("c-groups"));
+  const t = document.createElement("div"); t.className = "pr"; const tr = document.createElement("div"); tr.className = "tray"; t.append(tr); tray(tr);
+  $("c-groups").prepend(t); $("c-groups").prepend(Object.assign(document.createElement("div"), { className: "gt", textContent: "Other screens" }));
+}
+function cSheet(on) { $("c-sheet").style.display = on ? "flex" : "none"; if (on) emit(); }
+onChange(drawA); onChange(drawB); onChange(drawC);
+canvas($("a-canvas")); canvas($("b-canvas")); $("b-canvas").style.height = "100%"; canvas($("c-canvas"));
+emit();
+</script>
+<script>window.FEEDBACK = { aqua: "153e308b938f" };</script>
+<script src="feedback.js"></script>
+</body></html>
