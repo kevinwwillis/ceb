@@ -20,7 +20,7 @@ requirement, not a pip dependency, because pip would try to build it from source
 ```bash
 python3 -m venv --system-site-packages .venv   # system site packages for PyGObject
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest
+.venv/bin/python -m pytest
 ```
 
 ## Command line
@@ -44,8 +44,11 @@ skipped (`--allow-missing`).
 
 ## Window
 
+Needs GTK 4 and libadwaita 1.8 or newer (GNOME 49 and later); `pam-gui` checks this when it starts and
+says what is missing. The command-line tool works without them.
+
 ```bash
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1   # GTK 4, libadwaita 1.7+
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1   # GTK 4, libadwaita 1.8+
 pam-gui                 # or: pam gui
 pam-gui --dry-run       # Apply only asks GNOME to check the layout; nothing changes
 pam-gui --demo          # example screens and audio, throwaway store, in-memory shortcuts
@@ -55,7 +58,18 @@ Profiles are listed on the left with their keyboard shortcut. For the selected p
 screens (they snap to each other's edges; a screen dropped where GNOME would refuse it moves to the
 nearest place GNOME accepts), add screens that are connected or remembered, make one primary or
 turn it off, pick the audio output and input ("Leave unchanged" keeps whatever is set), and set a
-keyboard shortcut. Every change is saved at once; Apply switches to the profile.
+keyboard shortcut. Every change is saved at once; Apply switches to the profile. If the profile was
+changed outside the window meanwhile (for example `pam save-current --force`), the window shows the
+newer version instead of overwriting it.
+
+Keyboard: in the profile list, Tab and the arrow keys move the focus and Enter or Space opens the
+profile. In the arrangement, the arrow keys select the next or previous screen and Ctrl+arrow keys
+move the selected screen one step, snapping like a drag, to the next place GNOME accepts. Ctrl+Return
+applies, Ctrl+N saves the current screens as a new profile.
+
+Screens that mirror each other are one box with "+ N" in its name; each screen of the group is listed
+under "Selected screen", so it can be turned off on its own. Main menu > Remembered Devices lists the
+screens and audio devices PAM remembers that are not connected now, each with Forget.
 
 Shortcuts are GNOME custom shortcuts (Settings > Keyboard > Custom Shortcuts) that run
 `pam apply <profile>`; PAM changes only the custom shortcuts whose command is exactly that.
@@ -65,7 +79,7 @@ window on your desktop:
 
 ```bash
 gtk4-broadwayd :7 &
-GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 .venv/bin/pytest tests/test_gui_window.py
+GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 .venv/bin/python -m pytest tests/test_gui_window.py
 ```
 
 ## Library
@@ -78,6 +92,8 @@ state, audio, errors = pam.current()      # connected screens and audio devices,
 known = pam.known()                       # every screen and audio device ever seen
 pam.save_current("desk")
 result = pam.apply("desk", dry_run=True)  # ApplyResult: problems, errors, display_plan, audio_plan
+pam.rename_profile("desk", "office")      # keeps its place in the list
+pam.forget_screen(known.screens[0].screen)  # drop a screen from the history (forget_audio too)
 ```
 
 ## License

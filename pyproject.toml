@@ -18,6 +18,8 @@ dependencies = [
 # requirement, as for other GNOME apps: the distribution's python3-gi, or the GNOME Flatpak runtime.
 # It is not a pip dependency because pip would try to build it from source against the system's
 # GLib/GObject-Introspection headers. The `gi` extra installs it from PyPI for those who want that.
+# The window (pam-gui) also needs GTK 4 and libadwaita >= 1.8 (Adw.ShortcutLabel) with their
+# introspection data; pam-gui checks the version at start. The `pam` command does not need them.
 
 [project.optional-dependencies]
 gi = ["PyGObject>=3.42"]

@@ -47,10 +47,13 @@ Limits (no data can fix these):
 
 ## Remembered screens and audio devices
 
-Every time PAM reads the screens or audio devices (list, save, apply; the GUI should also do it on
-Mutter's `MonitorsChanged` signal), it records each one in `known.json`: identity and twin number,
+Every time PAM reads the screens or audio devices (list, save, apply; the window also on Mutter's
+`MonitorsChanged` signal, 0.3 s later, in a background thread, and not while a screen is being
+dragged or a popover is open), it records each one in `known.json`: identity and twin number,
 display name, all modes, the last port and GPU, first and last seen. Entries are never removed
-automatically, so the GUI can show and place screens that are not connected. Twins get one entry
+automatically, so the GUI can show and place screens that are not connected. They are removed only
+when asked (`Pam.forget_screen`, `Pam.forget_audio`; in the window, Remembered Devices > Forget,
+offered only for ones not connected now); profiles that use a forgotten screen or device keep it. Twins get one entry
 each. Audio devices are remembered by name with their description.
 
 - "Last seen" is kept to the hour: seeing the same screens and devices again rewrites `known.json`
