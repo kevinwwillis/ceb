@@ -77,7 +77,10 @@ class CebWindow(Adw.ApplicationWindow):
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self._build()
         self._install_actions()
+        upgraded = self._upgrade_legacy_shortcuts()
         self.reload(select=None)
+        if upgraded:
+            self.toast(f"Updated {upgraded} keyboard shortcut{'s' if upgraded != 1 else ''} from PAM to CEB")
         self._watch_monitors()
         self.connect("close-request", self._on_close)
 
@@ -254,6 +257,14 @@ class CebWindow(Adw.ApplicationWindow):
         app = self.get_application()
         app.set_accels_for_action("win.new-profile", ["<Control>n"])
         app.set_accels_for_action("win.apply", ["<Control>Return"])
+
+    def _upgrade_legacy_shortcuts(self) -> int:
+        """Shortcuts made while the app was called PAM run `pam apply`; point them at `ceb apply`
+        (gui/shortcuts.py). A failure here is shown with the other problems by reload()."""
+        try:
+            return self.shortcuts.upgrade_legacy()
+        except (ShortcutError, GLib.Error):
+            return 0
 
     # ================================================================ data
 
