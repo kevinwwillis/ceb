@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CEB — save vs switch, bottom action bar (mockups)</title>
+<style>
+:root{--bg:#1d1d20;--win:#242424;--side:#2e2e32;--card:#363639;--line:#ffffff1a;--fg:#ffffffde;--dim:#ffffff8c;--acc:#3584e4;--ok:#2ec27e;--warn:#e5a50a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px Cantarell,"Noto Sans",system-ui,sans-serif;padding:16px}
+h1{font-size:20px;margin:0 0 4px}.lead{color:var(--dim);margin:0 0 18px;max-width:1150px}
+section[data-piece]{margin-bottom:40px}section[data-piece]>h2{font-size:17px;margin:8px 0 4px}.why{color:var(--dim);margin:0 0 14px;max-width:1150px}
+[data-option]{margin:0 0 26px}.optlabel{font-weight:700;margin:0 0 8px}
+.win{background:var(--win);border:1px solid #000;border-radius:12px;overflow:hidden;box-shadow:0 10px 30px #0008;height:600px;display:flex;flex-direction:column;width:100%;position:relative}
+.hb{height:46px;flex:none;display:flex;align-items:center;gap:8px;padding:0 10px;background:#303030;border-bottom:1px solid #0006}
+.hb .t{flex:1;text-align:center;font-weight:700}.hb .t small{display:block;font-weight:400;color:var(--dim);font-size:11px}
+.btn{background:#ffffff1a;border:0;color:var(--fg);border-radius:6px;padding:7px 14px;font:inherit;cursor:pointer;white-space:nowrap}
+.btn.sug{background:var(--acc);color:#fff}.btn.flat{background:none}.btn:hover{filter:brightness(1.2)}.btn:disabled{opacity:.4;cursor:default}
+.body{flex:1;display:flex;min-height:0}
+.side{width:230px;flex:none;background:var(--side);border-right:1px solid #0005;padding:8px;overflow:auto}
+.row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer}.row:hover{background:#ffffff0d}
+.row.on{background:#ffffff1f}.row .k{margin-left:auto;color:var(--dim);font-size:12px;font-family:monospace}
+.pane{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+.main{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:14px}
+.canvas{position:relative;background:#1a1a1c;border-radius:12px;min-height:220px;flex:none;overflow:hidden;touch-action:none}
+.scr{position:absolute;background:#3a4a63;border:2px solid #6b85b3;border-radius:6px;cursor:grab;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;font-size:12px;padding:4px;user-select:none;overflow:hidden}
+.scr span{color:var(--dim);font-size:11px}.scr.sel{border-color:#fff;box-shadow:0 0 0 3px var(--acc)}
+.scr.gone{background:repeating-linear-gradient(45deg,#333 0 8px,#2b2b2b 8px 16px);border-style:dashed;border-color:#888}
+.star{font-style:normal;color:#f6d32d;font-size:11px}.empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim)}
+.gt{font-weight:700;font-size:13px;margin:4px 2px 6px}.group{background:var(--card);border-radius:12px;overflow:hidden}
+.pr{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line);min-height:48px;flex-wrap:wrap}.pr:last-child{border:0}
+.pr .l{flex:1;min-width:0}.pr .l small{display:block;color:var(--dim)}
+select{background:#ffffff14;color:var(--fg);border:0;border-radius:6px;padding:6px 8px;font:inherit;max-width:100%}
+.dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block}.dot.c{background:var(--ok)}.dot.g{background:#777}
+.kbd{font-family:monospace;background:#ffffff14;border-radius:5px;padding:4px 8px}
+.chip{display:inline-flex;align-items:center;gap:8px;background:#ffffff0d;border-radius:10px;padding:8px 12px;margin:4px}
+/* bars */
+.bar{display:flex;align-items:center;gap:10px;padding:10px 14px;flex-wrap:wrap}
+.bar .st{flex:1;color:var(--dim);display:flex;align-items:center;gap:8px;min-width:150px}
+.bar .st.dirty{color:var(--warn)}
+.dock{flex:none;background:#2a2a2d;border-top:1px solid #0007}
+.pill{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);background:#38383cf2;border:1px solid #ffffff22;border-radius:14px;box-shadow:0 8px 24px #000a;max-width:calc(100% - 24px)}
+.pill .st{flex:none;min-width:0}
+.wide{flex:none;background:#2a2a2d;border-top:1px solid #0007}
+.strip{background:var(--win);border:1px solid #000;border-radius:12px;overflow:hidden;max-width:900px}
+.testing{background:#1c3d5a!important}
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,90px);background:#353535;color:#fff;padding:10px 18px;border-radius:20px;transition:.25s;z-index:99}#toast.on{transform:translate(-50%,0)}
+@media (max-width:760px){.side{display:none}.win{height:700px}.bar .st{flex-basis:100%}}
+</style></head><body>
+<h1>CEB — save vs switch, and a bottom action bar</h1>
+<p class="lead">Your three points: (1) making or editing a profile must never change your screens; it is saved, and switching is a separate button, with an optional Test; (2) profiles may include remembered, not-connected screens and still save; (3) the Apply button moves from the header to a bar at the bottom that can hold more buttons later. Everything works here: drag screens, add the not-connected SANTAK projector, press Save, Test, Switch. Same example data as the picked layout A; nothing on this page touches your real screens.</p>
+
+<section data-piece="reading">
+<h2>1. Is this what you meant?</h2>
+<p class="why">My reading of your message, in one line each. Tick "Yes" or "Not quite" and add a note.</p>
+<div class="group" style="max-width:1150px;margin-bottom:12px">
+ <div class="pr"><div class="l">Editing a profile (drag, add/remove screens, audio, primary) never changes your screens; it only changes the saved profile.</div></div>
+ <div class="pr"><div class="l">The bar's main button "Switch to profile" (today's Apply) changes your screens and audio to the profile; it is the only thing that does, besides the keyboard shortcuts and "Test".</div></div>
+ <div class="pr"><div class="l">A profile can be saved with screens that are not connected now; switching to it then says what is missing (as today).</div></div>
+ <div class="pr"><div class="l">The header keeps only + (new profile), the title and the ☰ menu.</div></div>
+</div>
+<div data-option="yes" data-label="Yes, that's it"><span class="optlabel">Yes, that's it</span></div>
+<div data-option="no" data-label="Not quite"><span class="optlabel">Not quite (add a note)</span></div>
+</section>
+
+<section data-piece="bar">
+<h2>2. Where the action bar sits</h2>
+<p class="why">What it's for: holds Save, Test and Switch (and later buttons). What differs: only where the bar is and its shape. All three use explicit Save.</p>
+<div data-option="A" data-label="A: Docked bar under the profile pane"><p class="optlabel">A — Docked bar along the bottom of the right pane (sidebar stays full height)</p><div id="winA"></div></div>
+<div data-option="B" data-label="B: Floating pill over the content"><p class="optlabel">B — Floating rounded bar centered over the bottom of the content; the content scrolls under it</p><div id="winB"></div></div>
+<div data-option="C" data-label="C: Full-width bar across the window"><p class="optlabel">C — Full-width bar along the bottom of the whole window, under the sidebar too</p><div id="winC"></div></div>
+</section>
+
+<section data-piece="saving">
+<h2>3. How saving works</h2>
+<p class="why">What it's for: knowing your edits are kept. What differs: whether you press Save, or every change is kept at once and the bar says so. Press "Make an edit" to see each one react.</p>
+<div data-option="explicit" data-label="Explicit Save and Discard"><p class="optlabel">Explicit — edits are pending until you press Save; Discard throws them away; switching profiles with unsaved edits asks first</p><div class="strip" id="saveA"></div></div>
+<div data-option="auto" data-label="Saved automatically, with a Saved note"><p class="optlabel">Automatic — every edit is saved at once (what CEB does today), and the bar now says "All changes saved"</p><div class="strip" id="saveB"></div></div>
+</section>
+
+<section data-piece="test">
+<h2>4. Test button</h2>
+<p class="why">What it's for: trying a profile without committing to it. What differs: whether there is a Test button.</p>
+<div data-option="test" data-label="Test, back after 15 s unless kept"><p class="optlabel">Test — switches now, then goes back to the screens you had after 15 seconds unless you press "Keep"</p><div class="strip" id="testA"></div></div>
+<div data-option="none" data-label="No Test button"><p class="optlabel">No Test — only Switch; use your shortcut to switch back</p><div class="strip" id="testB"></div></div>
+</section>
+
+<script src="data.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+SCREENS.proj.sub = "42\" projector · not connected"; SCREENS.lenL.sub = "23\" · twin 1 of 2 (lower port)"; SCREENS.lenR.sub = "23\" · twin 2 of 2 (higher port)";
+let dirty = false;
+const snapshot = () => JSON.stringify(PROFILES);
+let saved = snapshot();
+function markDirty() { const d = snapshot() !== saved; if (d !== dirty) { dirty = d; } bars.forEach((f) => f()); }
+onChange(markDirty);
+const bars = [];
+function barHTML(kind, { save = "explicit", test = true } = {}) {
+  const el = document.createElement("div"); el.className = "bar " + kind;
+  let testing = 0, timer = null;
+  function render() {
+    const st = save === "explicit"
+      ? (dirty ? '<span class="st dirty">● Unsaved changes</span>' : '<span class="st">✓ Saved</span>')
+      : '<span class="st">✓ All changes saved</span>';
+    el.classList.toggle("testing", !!testing);
+    if (testing) { el.innerHTML = `<span class="st" style="color:#fff">Testing “${P().name}” — going back in ${testing} s</span><button class="btn" data-a="back">Go back now</button><button class="btn sug" data-a="keep">Keep</button>`; }
+    else el.innerHTML = st + (save === "explicit" ? `<button class="btn" data-a="discard" ${dirty ? "" : "disabled"}>Discard</button><button class="btn" data-a="save" ${dirty ? "" : "disabled"}>Save</button>` : "")
+      + (test ? '<button class="btn" data-a="test">Test</button>' : "") + '<button class="btn sug" data-a="switch">Switch to profile</button>';
+  }
+  el.onclick = (e) => {
+    const a = e.target.dataset.a; if (!a) return;
+    if (a === "save") { saved = snapshot(); dirty = false; toast(`Saved “${P().name}” — your screens did not change`); }
+    if (a === "discard") { const o = JSON.parse(saved); PROFILES.forEach((p, i) => Object.assign(p, o[i])); dirty = false; emit(); toast("Changes discarded"); }
+    if (a === "switch") toast(dirty && save === "explicit" ? `Switched to the saved “${P().name}” (unsaved edits are not used)` : `Switched screens and audio to “${P().name}” (mockup)`);
+    if (a === "test") { testing = 15; clearInterval(timer); timer = setInterval(() => { testing--; if (!testing) { clearInterval(timer); toast("Back to your previous screens"); } render(); }, 1000); toast(`Testing “${P().name}”`); }
+    if (a === "keep") { clearInterval(timer); testing = 0; toast(`Kept “${P().name}”`); }
+    if (a === "back") { clearInterval(timer); testing = 0; toast("Back to your previous screens"); }
+    bars.forEach((f) => f());
+  };
+  bars.push(render); render(); return el;
+}
+function content(host) {
+  const side = document.createElement("div"); side.className = "side";
+  const pane = document.createElement("div"); pane.className = "pane";
+  const main = document.createElement("div"); main.className = "main"; pane.append(main);
+  const cv = document.createElement("div"); main.append(cv);
+  const other = document.createElement("div"), sel = document.createElement("div"), aud = document.createElement("div");
+  main.append(other, sel, aud);
+  function draw() {
+    side.innerHTML = "";
+    PROFILES.forEach((p, i) => { const r = document.createElement("div"); r.className = "row" + (i === state.profile ? " on" : "");
+      r.innerHTML = `<span>${p.name}</span><span class="k">${p.key}</span>`; r.onclick = () => selectProfile(i); side.append(r); });
+    other.innerHTML = '<div class="gt">Other screens</div>'; const og = document.createElement("div"); og.className = "group"; const op = document.createElement("div"); op.className = "pr"; og.append(op); other.append(og);
+    const u = unusedScreens(); if (!u.length) op.innerHTML = '<span style="color:var(--dim)">Every known screen is in this profile</span>';
+    for (const k of u) { const S = SCREENS[k], c = document.createElement("span"); c.className = "chip";
+      c.innerHTML = `<span class="dot ${S.connected ? "c" : "g"}"></span><span>${S.name}<br><small style="color:var(--dim)">${S.connected ? "connected" : "remembered · not connected"}</small></span>`;
+      const b = document.createElement("button"); b.className = "btn"; b.textContent = "Add"; b.onclick = () => toggleScreen(k); c.append(b); op.append(c); }
+    const s = state.selected, S = SCREENS[s]; sel.innerHTML = "";
+    if (s && P().layout[s]) { sel.innerHTML = `<div class="gt">Selected screen</div><div class="group"><div class="pr"><div class="l">${S.name}<small>${S.sub}</small></div></div></div>`;
+      const pr = sel.querySelector(".pr"); const pb = document.createElement("button"); pb.className = "btn"; pb.textContent = P().primary === s ? "★ Primary" : "Make primary"; pb.onclick = () => { P().primary = s; emit(); };
+      const rm = document.createElement("button"); rm.className = "btn"; rm.textContent = "Turn off in profile"; rm.onclick = () => toggleScreen(s); pr.append(pb, rm); }
+    aud.innerHTML = '<div class="gt">Audio for this profile</div>'; const ag = document.createElement("div"); ag.className = "group"; aud.append(ag);
+    for (const [lab, list, f] of [["Output", OUTPUTS, "out"], ["Input", INPUTS, "inp"]]) { const r = document.createElement("div"); r.className = "pr"; r.innerHTML = `<div class="l">${lab}</div>`;
+      r.append(selectEl(list, P()[f], (v) => { P()[f] = v; emit(); })); ag.append(r); }
+    const k = document.createElement("div"); k.className = "pr"; k.innerHTML = `<div class="l">Keyboard shortcut</div><span class="kbd">${P().key}</span><button class="btn">Change</button>`; ag.append(k);
+    main.append(Object.assign(document.createElement("div"), { style: "height:70px;flex:none" }));
+  }
+  onChange(draw); canvas(cv); draw();
+  return { side, pane, main };
+}
+function windowFor(id, kind) {
+  const w = document.createElement("div"); w.className = "win";
+  w.innerHTML = '<div class="hb"><button class="btn flat" title="New profile">＋</button><div class="t">CEB<small>Desk — 3 monitors</small></div><button class="btn flat">☰</button></div>';
+  const body = document.createElement("div"); body.className = "body"; w.append(body);
+  const { side, pane } = content();
+  body.append(side, pane);
+  if (kind === "A") pane.append(barHTML("dock"));
+  if (kind === "B") pane.append(barHTML("pill"));
+  if (kind === "C") w.append(barHTML("wide"));
+  onChange(() => { w.querySelector(".t small").textContent = P().name; });
+  $(id).append(w);
+}
+windowFor("winA", "A"); windowFor("winB", "B"); windowFor("winC", "C");
+function strip(id, opts) { const s = $(id); const top = document.createElement("div"); top.className = "bar"; top.style.borderBottom = "1px solid #0006";
+  top.innerHTML = '<span class="st">Try it:</span>'; const b = document.createElement("button"); b.className = "btn"; b.textContent = "Make an edit (move a screen)";
+  b.onclick = () => { const L = PROFILES[state.profile].layout; const k = Object.keys(L)[0]; L[k] = [L[k][0], L[k][1] ? 0 : 200]; emit(); }; top.append(b); s.append(top, barHTML("dock", opts)); }
+strip("saveA", { save: "explicit" }); strip("saveB", { save: "auto" }); strip("testA", { test: true }); strip("testB", { test: false });
+emit();
+</script>
+<script>window.FEEDBACK = { aqua: "5902f8184446" };</script>
+<script src="feedback.js"></script>
+</body></html>
