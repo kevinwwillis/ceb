@@ -113,6 +113,11 @@ def plan_display(layout: DisplayLayout, state: DisplayState) -> DisplayPlan:
                                     f"the profile was saved in layout mode {layout.layout_mode}, GNOME is in "
                                     f"mode {state.layout_mode} and cannot change it; positions would be wrong"))
 
+    unsure = {m.identity: m for m in state.monitors if m.twin_order_without_gpu}
+    for m in unsure.values():
+        notes.append(f"the graphics card of some {m.display_name or m.identity.describe()} ports could not be "
+                     f"read; these identical twins were ordered by port name only")
+
     turned_off = [m for m in state.monitors if m.connector not in used]
     return DisplayPlan(out, properties, problems, notes, turned_off)
 

@@ -98,6 +98,9 @@ class ConnectedMonitor:
     gpu: str | None = None  # PCI address of its card, when it could be found
     twin: int = 0
     twin_count: int = 1
+    # True when this monitor's twins were ordered by port name only because the GPU of some (not
+    # all) of them could not be read; the planner reports it as a note.
+    twin_order_without_gpu: bool = False
 
     @property
     def screen_id(self) -> ScreenId:

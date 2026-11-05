@@ -136,14 +136,21 @@ def parse_current_state(reply: tuple, gpu_of=lambda connector: None) -> DisplayS
 
 def rank_twins(monitors: list[ConnectedMonitor]) -> None:
     """Give each monitor its twin rank: among connected monitors with the same identity, 0 is the one
-    on the lowest port (by port_sort_key), 1 the next, and so on."""
+    on the lowest port (by port_sort_key), 1 the next, and so on.
+
+    The GPU is part of the key only when it is known for every twin in the group. If it is unknown
+    for one of them (sysfs unreadable, status not 'connected' during a hotplug, a port name found
+    on two cards), the whole group is ordered by port name alone. Mixing the two would let a failed
+    lookup reorder the twins: an unknown GPU would sort before every known one."""
     groups: dict[Identity, list[ConnectedMonitor]] = {}
     for m in monitors:
         groups.setdefault(m.identity, []).append(m)
     for group in groups.values():
-        group.sort(key=lambda m: port_sort_key(m.connector, m.gpu))
+        use_gpu = all(m.gpu for m in group)
+        group.sort(key=lambda m: port_sort_key(m.connector, m.gpu if use_gpu else None))
         for rank, m in enumerate(group):
             m.twin, m.twin_count = rank, len(group)
+            m.twin_order_without_gpu = len(group) > 1 and not use_gpu and any(t.gpu for t in group)
 
 
 # ---------------------------------------------------------------- the D-Bus backend

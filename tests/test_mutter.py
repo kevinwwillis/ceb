@@ -42,6 +42,28 @@ def test_twin_rank_uses_gpu_before_port_name():
     assert state.by_connector("HDMI-2").twin == 0
 
 
+@pytest.mark.parametrize("known", ["HDMI-1", "HDMI-2"])
+def test_partial_gpu_lookup_never_reorders_twins(known):
+    # Both twins on one card. If the lookup fails for one of them, the order must be the same as
+    # when it works for both (port name order), not "unknown GPU first".
+    r = reply([mon("HDMI-1", LENOVO), mon("HDMI-2", LENOVO)])
+    full = parse_current_state(r, {"HDMI-1": "0000:2d:00.0", "HDMI-2": "0000:2d:00.0"}.get)
+    partial = parse_current_state(r, {known: "0000:2d:00.0"}.get)
+    for state in (full, partial):
+        assert state.by_connector("HDMI-1").twin == 0 and state.by_connector("HDMI-2").twin == 1
+    assert not full.by_connector("HDMI-1").twin_order_without_gpu
+    assert partial.by_connector("HDMI-1").twin_order_without_gpu
+
+
+def test_partial_gpu_lookup_is_reported_in_the_plan():
+    from pam_profiles.model import DisplayLayout
+    from pam_profiles.planner import plan_display
+    state = parse_current_state(reply([mon("HDMI-1", LENOVO), mon("HDMI-2", LENOVO)]),
+                                {"HDMI-2": "0000:2d:00.0"}.get)
+    plan = plan_display(DisplayLayout([]), state)
+    assert any("ordered by port name only" in n for n in plan.notes)
+
+
 def _fake_sysfs(root, cards):
     """cards: {card_name: (pci_address, {connector: status})}"""
     devices = root / "devices"
