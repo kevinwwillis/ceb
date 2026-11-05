@@ -1,10 +1,15 @@
 """The arrangement canvas: one box per screen of the profile, drawn to scale.
 
-Click a box to select it; drag it to move it. While dragging, the box snaps to its neighbours'
-edges; when it is dropped somewhere GNOME would refuse (overlapping, or not touching another screen
-along an edge) it moves to the nearest place GNOME accepts. The selected box has a highlight ring,
-the primary screen is marked "★ primary", and a screen that is not connected is drawn hatched with
-a dashed border and "not connected".
+Click a box to select it; drag it to move it. A press that moves less than GTK's drag threshold is
+a click and never moves the screen. While dragging, the box snaps to its neighbours' edges; when it
+is dropped somewhere GNOME would refuse (overlapping, or not touching another screen along an edge)
+it moves to the nearest place GNOME accepts. The selected box has a highlight ring, the primary
+screen is marked "★ primary", and a screen that is not connected is drawn hatched with a dashed
+border and "not connected".
+
+Keyboard: the arrow keys select the next or previous screen; Ctrl+arrow keys move the selected
+screen one step that way, snapping like a drag, to the next place GNOME accepts. When the canvas
+has keyboard focus it draws a focus ring.
 """
 from __future__ import annotations
 
@@ -20,7 +25,7 @@ gi.require_version("PangoCairo", "1.0")
 gi.require_foreign("cairo")  # cairo.Context for the draw function (python3-gi-cairo)
 from gi.repository import Adw, Gdk, Gtk, Pango, PangoCairo  # noqa: E402
 
-from .geometry import Rect, settle, snap  # noqa: E402
+from .geometry import Rect, nudge, settle, snap  # noqa: E402
 
 PAD = 24          # px around the layout inside the canvas (the mockup's 24)
 MAX_SCALE = 0.12  # canvas px per layout px at most (the mockup's 0.12)
@@ -34,6 +39,10 @@ class Item:
     subtitle: str
     primary: bool
     connected: bool
+    members: tuple = ()  # every ScreenId in this logical monitor (more than one: mirrored)
+
+    def holds(self, sid) -> bool:
+        return sid == self.key or sid in self.members
 
 
 def _rgba(hex_: str, alpha: float = 1.0) -> tuple[float, float, float, float]:
@@ -62,6 +71,7 @@ class ArrangementCanvas(Gtk.DrawingArea):
         self._on_select, self._on_moved = on_select, on_moved
         self._view = None        # (scale, ox, oy), frozen while dragging
         self._drag = None        # (index, start rect)
+        self._moved = False      # the pointer passed the drag threshold during this press
         self.set_size_request(-1, 260)
         self.set_hexpand(True)
         self.set_focusable(True)
@@ -76,7 +86,31 @@ class ArrangementCanvas(Gtk.DrawingArea):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._key)
         self.add_controller(keys)
+        focus = Gtk.EventControllerFocus()
+        focus.connect("enter", lambda *_: self.queue_draw())
+        focus.connect("leave", lambda *_: self.queue_draw())
+        self.add_controller(focus)
+        self._root_handler = None
+        self.connect("realize", self._on_realize)
+        self.connect("unrealize", self._on_unrealize)
+        self.update_property([Gtk.AccessibleProperty.DESCRIPTION],
+                             ["Arrow keys select a screen; Ctrl+arrow keys move it"])
         Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.queue_draw())
+
+    def _on_realize(self, _w):
+        root = self.get_root()
+        if root is not None:
+            self._root_handler = (root, root.connect("notify::focus-visible", lambda *_: self.queue_draw()))
+
+    def _on_unrealize(self, _w):
+        if self._root_handler:
+            root, hid = self._root_handler
+            root.disconnect(hid)
+            self._root_handler = None
+
+    @property
+    def dragging(self) -> bool:
+        return self._drag is not None
 
     # ------------------------------------------------------------ data
 
@@ -124,14 +158,20 @@ class ArrangementCanvas(Gtk.DrawingArea):
             return
         self._view = self._compute_view(self.get_width(), self.get_height())
         self._drag = (index, self.items[index].rect)
-        self.selected = self.items[index].key
+        self._moved = False
+        if not self.items[index].holds(self.selected):
+            self.selected = self.items[index].key
         self._on_select(self.selected)
-        self.set_cursor(Gdk.Cursor.new_from_name("grabbing"))
         self.queue_draw()
 
     def _drag_update(self, gesture, dx, dy):
         if self._drag is None:
             return
+        if not self._moved:
+            if max(abs(dx), abs(dy)) < _drag_threshold(self):
+                return  # still a click
+            self._moved = True
+            self.set_cursor(Gdk.Cursor.new_from_name("grabbing"))
         index, start = self._drag
         s = self._view[0]
         others = [it.rect for i, it in enumerate(self.items) if i != index]
@@ -146,7 +186,8 @@ class ArrangementCanvas(Gtk.DrawingArea):
         self._drag = None
         self.set_cursor(None)
         rect = self.items[index].rect
-        if rect == start:
+        if not self._moved or rect == start:
+            self.items[index] = replace(self.items[index], rect=start)
             self.queue_draw()
             return
         rects, as_dropped = settle([it.rect for it in self.items], index, start)
@@ -154,21 +195,43 @@ class ArrangementCanvas(Gtk.DrawingArea):
         self.items[index] = replace(self.items[index], rect=new)
         self._on_moved(self.items[index].key, new.x, new.y, as_dropped)
 
+    _DIRECTIONS = {Gdk.KEY_Left: (-1, 0), Gdk.KEY_Right: (1, 0), Gdk.KEY_Up: (0, -1), Gdk.KEY_Down: (0, 1),
+                   Gdk.KEY_KP_Left: (-1, 0), Gdk.KEY_KP_Right: (1, 0), Gdk.KEY_KP_Up: (0, -1),
+                   Gdk.KEY_KP_Down: (0, 1)}
+
     def _key(self, controller, keyval, keycode, state):
-        """Arrow keys select the next or previous screen (moving is done by dragging)."""
-        if not self.items:
+        """Arrow keys select the next or previous screen; Ctrl+arrow keys move the selected one."""
+        if not self.items or keyval not in self._DIRECTIONS:
+            return False
+        mods = state & Gtk.accelerator_get_default_mod_mask()
+        if mods == Gdk.ModifierType.CONTROL_MASK:
+            return self.move_selected(*self._DIRECTIONS[keyval])
+        if mods:
             return False
         keys = [it.key for it in self.items]
-        i = keys.index(self.selected) if self.selected in keys else -1
-        if keyval in (Gdk.KEY_Right, Gdk.KEY_Down):
+        i = next((n for n, it in enumerate(self.items) if it.holds(self.selected)), -1)
+        if keyval in (Gdk.KEY_Right, Gdk.KEY_Down, Gdk.KEY_KP_Right, Gdk.KEY_KP_Down):
             i = (i + 1) % len(keys)
-        elif keyval in (Gdk.KEY_Left, Gdk.KEY_Up):
-            i = (i - 1) % len(keys)
         else:
-            return False
+            i = (i - 1) % len(keys)
         self.selected = keys[i]
         self._on_select(self.selected)
         self.queue_draw()
+        return True
+
+    def move_selected(self, dx: int, dy: int) -> bool:
+        """Move the selected screen one step (see geometry.nudge). Returns True if the key was used."""
+        index = next((n for n, it in enumerate(self.items) if it.holds(self.selected)), None)
+        if index is None or self._drag is not None:
+            return False
+        rects = nudge([it.rect for it in self.items], index, dx, dy)
+        if rects is None:
+            self.error_bell()
+            return True
+        new = rects[index]
+        self.items[index] = replace(self.items[index], rect=new)
+        self.queue_draw()
+        self._on_moved(self.items[index].key, new.x, new.y, True)
         return True
 
     # ------------------------------------------------------------ drawing
@@ -180,6 +243,7 @@ class ArrangementCanvas(Gtk.DrawingArea):
         cr.fill()
         if not self.items:
             self._text(cr, self.empty_text, width / 2, height / 2, width - 2 * PAD, c["dim"], 10, center=True)
+            self._focus_ring(cr, width, height)
             return
         s, ox, oy = self._view_now() if self._drag else self._compute_view(width, height)
         if not self._drag:
@@ -188,7 +252,7 @@ class ArrangementCanvas(Gtk.DrawingArea):
         for it in self.items:
             r = it.rect
             x, y, w, h = ox + r.x * s, oy + r.y * s, r.w * s, r.h * s
-            selected = it.key == self.selected
+            selected = it.holds(self.selected)
             if selected:  # the mockup's 3 px accent ring outside the border
                 _rounded(cr, x - 3, y - 3, w + 6, h + 6, 8)
                 cr.set_source_rgba(accent.red, accent.green, accent.blue, 1)
@@ -226,6 +290,19 @@ class ArrangementCanvas(Gtk.DrawingArea):
             self._labels(cr, it, x, y, w, h, c)
         if self.warning:
             self._text(cr, self.warning, width / 2, height - 14, width - 2 * PAD, _rgba("#ff7b63"), 9, center=True)
+        self._focus_ring(cr, width, height)
+
+    def _focus_ring(self, cr, width, height):
+        """libadwaita's focus ring: 2 px of the accent colour at half opacity, drawn only for keyboard
+        focus (as GTK does for its own widgets)."""
+        root = self.get_root()
+        if not self.has_focus() or root is None or not root.get_focus_visible():
+            return
+        accent = Adw.StyleManager.get_default().get_accent_color_rgba()
+        cr.set_source_rgba(accent.red, accent.green, accent.blue, 0.5)
+        cr.set_line_width(2)
+        _rounded(cr, 1, 1, width - 2, height - 2, 11)
+        cr.stroke()
 
     def _labels(self, cr, it: Item, x, y, w, h, c):
         lines = [(it.title, c["text"], 9, True), (it.subtitle, c["dim"], 8, False)]
@@ -266,6 +343,14 @@ class ArrangementCanvas(Gtk.DrawingArea):
         cr.move_to(cx - max_w / 2, cy - lh / 2)
         cr.set_source_rgba(*color)
         PangoCairo.show_layout(cr, lay)
+
+
+def _drag_threshold(widget) -> int:
+    settings = widget.get_settings()
+    try:
+        return int(settings.get_property("gtk-dnd-drag-threshold"))
+    except (TypeError, ValueError):
+        return 8
 
 
 def _rounded(cr, x, y, w, h, r):

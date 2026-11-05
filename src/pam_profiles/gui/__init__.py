@@ -15,6 +15,33 @@ import tempfile
 
 APP_ID = "io.github.kevinwwillis.Pam"
 
+# The window uses Adw.ShortcutLabel, new in libadwaita 1.8 (GNOME 49).
+MIN_ADW = (1, 8)
+
+
+def version_problem(adw: tuple[int, int, int] | None) -> str | None:
+    """Why the window cannot run with this libadwaita version (None if it can)."""
+    need = ".".join(map(str, MIN_ADW))
+    if adw is None:
+        return (f"pam-gui needs GTK 4 and libadwaita {need} or newer with their GObject introspection data "
+                "(Debian/Ubuntu: gir1.2-gtk-4.0 gir1.2-adw-1; Fedora: gtk4 libadwaita). The command line "
+                "tool `pam` works without them.")
+    if tuple(adw[:2]) < MIN_ADW:
+        return (f"pam-gui needs libadwaita {need} or newer (GNOME 49); this system has "
+                f"{'.'.join(map(str, adw))}. The command line tool `pam` works with it.")
+    return None
+
+
+def _adw_version():
+    try:
+        import gi
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw
+    except (ValueError, ImportError):
+        return None
+    return Adw.get_major_version(), Adw.get_minor_version(), Adw.get_micro_version()
+
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="pam-gui", description="PAM: display and audio profiles for GNOME")
@@ -33,9 +60,10 @@ def main(argv=None) -> int:
         # Before Gio is loaded anywhere: keep every gsettings write in memory.
         os.environ["GSETTINGS_BACKEND"] = "memory"
 
-    import gi
-    gi.require_version("Gtk", "4.0")
-    gi.require_version("Adw", "1")
+    problem = version_problem(_adw_version())
+    if problem:
+        print(f"pam-gui: {problem}", file=sys.stderr)
+        return 1
     from gi.repository import Adw, Gio, Gtk
 
     from ..core import Pam
@@ -44,10 +72,11 @@ def main(argv=None) -> int:
 
     if opts.demo:
         from .demo import DemoAudio, DemoDisplay, seed
+        from .window import same_accel
         config_dir = opts.config_dir or tempfile.mkdtemp(prefix="pam-demo-")
         pam = Pam(display=DemoDisplay(), audio=DemoAudio(), store=Store(config_dir))
         shortcuts = Shortcuts(backend=Gio.memory_settings_backend_new())
-        seed(pam, shortcuts)
+        seed(pam, shortcuts, same_accel)
     else:
         pam = Pam(store=Store(opts.config_dir))
         shortcuts = Shortcuts()

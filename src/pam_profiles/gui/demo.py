@@ -85,12 +85,15 @@ class DemoAudio:
         self.state.default_input = name
 
 
-DEMO_KEYS = {"Desk — 3 monitors": "<Super>F1", "Center only": "<Super>F2", "Projector": "<Super>F3"}
+# Free on stock GNOME (Super+F1 opens Help there). seed() still checks for clashes like the window.
+DEMO_KEYS = {"Desk — 3 monitors": "<Super>F2", "Center only": "<Super>F3", "Projector": "<Super>F4"}
 
 
-def seed(pam, shortcuts) -> None:
+def seed(pam, shortcuts, same=None) -> None:
     """Fill an empty store with the example history and three profiles, and give the example
-    profiles their shortcuts (the in-memory shortcut settings start empty on every run)."""
+    profiles their shortcuts (the in-memory shortcut settings start empty on every run). A shortcut
+    that clashes with one GNOME or another custom shortcut uses is left out, as the window would
+    refuse it (`same` compares two accelerators; the window's same_accel)."""
     if not pam.profiles():
         pam.observe(DemoDisplay(with_projector=True).get_state(), pam.audio.snapshot())
         for p in _profiles(pam.display.get_state()):
@@ -98,7 +101,7 @@ def seed(pam, shortcuts) -> None:
     if shortcuts.available:
         have = shortcuts.all()
         for p in pam.profiles():
-            if p.name in DEMO_KEYS and p.name not in have:
+            if p.name in DEMO_KEYS and p.name not in have and not shortcuts.clash(DEMO_KEYS[p.name], p.name, same):
                 shortcuts.set(p.name, DEMO_KEYS[p.name])
 
 

@@ -182,3 +182,17 @@ def test_twin_labels_say_which_port(make_pam):
     rog = state.by_connector("HDMI-3").screen_id
     assert editor.label(rog, pam.known(), state).detail == '24" · serial L8LMQS075392'
     assert editor.label(rog, pam.known(), None).connected is False
+
+
+def test_version_check_names_the_libadwaita_needed():
+    from pam_profiles.gui import version_problem
+    assert version_problem((1, 8, 0)) is None and version_problem((1, 9, 1)) is None
+    assert "1.8" in version_problem((1, 7, 4)) and "1.7.4" in version_problem((1, 7, 4))
+    assert "gir1.2-adw-1" in version_problem(None)
+
+
+def test_pam_gui_exits_with_a_message_on_old_libadwaita(monkeypatch, capsys):
+    import pam_profiles.gui as gui
+    monkeypatch.setattr(gui, "_adw_version", lambda: (1, 7, 0))
+    assert gui.main([]) == 1  # before anything real is opened
+    assert "libadwaita 1.8" in capsys.readouterr().err

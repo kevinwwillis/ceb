@@ -23,7 +23,7 @@ from pam_profiles.core import Pam  # noqa: E402
 from pam_profiles.gui import editor  # noqa: E402
 from pam_profiles.gui.demo import DemoAudio, DemoDisplay, seed  # noqa: E402
 from pam_profiles.gui.shortcuts import Shortcuts  # noqa: E402
-from pam_profiles.gui.window import PamWindow  # noqa: E402
+from pam_profiles.gui.window import PamWindow, ShortcutDialog, same_accel  # noqa: E402
 from pam_profiles.store import Store  # noqa: E402
 
 
@@ -39,7 +39,7 @@ def app():
 def win(tmp_path, app):
     pam = Pam(display=DemoDisplay(), audio=DemoAudio(), store=Store(tmp_path / "pam"))
     shortcuts = Shortcuts(backend=Gio.memory_settings_backend_new(), command="pam")
-    seed(pam, shortcuts)
+    seed(pam, shortcuts, same_accel)
     w = PamWindow(app, pam, shortcuts, demo=True)
     yield w
     w.destroy()
@@ -66,7 +66,7 @@ def test_sidebar_lists_profiles_and_selects_the_primary(win):
     assert rows(win.sidebar_list) == ["Desk — 3 monitors", "Center only", "Projector"]
     assert win.current == "Desk — 3 monitors"
     assert win.selected == editor.primary_screen(win.profile())
-    assert win.keys["Desk — 3 monitors"] == "<Super>F1"
+    assert win.keys["Desk — 3 monitors"] == "<Super>F2"
 
 
 def test_add_turn_off_and_primary_are_saved(win):
@@ -114,7 +114,8 @@ def test_apply_sends_method_1_only_in_demo_and_dry_run_sends_only_0(win):
 
 
 def test_set_shortcut_refuses_a_clash_and_sets_a_free_one(win):
-    assert "Desk" in win.set_shortcut("Center only", "<Super>F1")
+    assert "Desk" in win.set_shortcut("Center only", "<Super>F2")
+    assert "GNOME" in win.set_shortcut("Center only", "<Super>F1")  # GNOME help
     assert win.set_shortcut("Center only", "<Control><Alt>p") is None
     assert win.keys["Center only"] == "<Control><Alt>p"
     assert win.set_shortcut("Center only", None) is None
@@ -141,6 +142,7 @@ def test_late_hdmi_audio_waits_off_the_main_loop_and_never_offers_apply_the_rest
     p = win.pam.profile("Desk — 3 monitors")
     p.audio_output = AudioRef("alsa_output.pci-0000_2d_00.1.hdmi-stereo-extra9", "GA102 HDMI 9")
     win.pam.put_profile(p)
+    win.reload(select=win.current)  # the window shows what was stored
     win.pam.audio_appear_wait_s = 1.0
 
     ticks = []
@@ -159,3 +161,274 @@ def test_history_problem_is_shown_in_the_banner(win, tmp_path):
     assert win.banner.get_revealed()
     assert "history not updated" in win.banner.get_title()
     assert win.content_stack.get_visible_child_name() == "profile"  # still usable
+
+
+# ------------------------------------------------------------ review fixes (2026-11-05)
+
+
+def by_name(listbox, name):
+    i = 0
+    while (row := listbox.get_row_at_index(i)) is not None:
+        if row.profile_name == name:
+            return row
+        i += 1
+
+
+def shown(win, size=(1100, 760)):
+    win.set_default_size(*size)
+    win.present()
+    assert spin(lambda: win.get_mapped() and win.canvas.get_width() > 0)
+    spin(lambda: False, 0.2)
+
+
+@pytest.fixture
+def dialogs(monkeypatch):
+    """Adw.AlertDialogs the window shows, captured instead of presented."""
+    got = []
+    monkeypatch.setattr(Adw.AlertDialog, "present", lambda self, parent=None: got.append(self))
+    return got
+
+
+def slow(pam, seconds):
+    real = pam.apply
+    calls = []
+
+    def apply(name, **kw):
+        calls.append((name, kw))
+        time.sleep(seconds)
+        return real(name, **kw)
+    pam.apply = apply
+    return calls
+
+
+def test_apply_the_rest_applies_the_profile_the_dialog_named(win, dialogs):
+    projector = next(k.screen for k in win.known.screens if k.screen.identity.vendor == "STK")
+    win._on_add_screen(None, projector)          # "Desk" now needs a screen that is not connected
+    calls = slow(win.pam, 0)
+    win._on_apply()
+    assert spin(lambda: not win._applying) and dialogs
+    assert "Desk" in dialogs[-1].get_heading()
+    win._on_row_activated(win.sidebar_list, by_name(win.sidebar_list, "Center only"))
+    assert win.current == "Center only"
+    dialogs[-1].emit("response", "rest")
+    assert spin(lambda: len(calls) == 2 and not win._applying)
+    assert calls[1] == ("Desk — 3 monitors", {"dry_run": False, "allow_missing": True})
+
+
+def test_closing_during_apply_waits_for_it_then_closes(win):
+    shown(win)
+    calls = slow(win.pam, 0.6)
+    win._on_apply()
+    assert win._applying and win.apply_spinner.get_visible() and win.apply_label.get_label() == "Applying…"
+    win.close()
+    spin(lambda: False, 0.1)
+    assert win.get_visible() and win._applying      # still open, switch still running
+    assert spin(lambda: not win.get_visible(), 5)   # closed once it was done
+    assert [m for m, _ in win.pam.display.sent] == [0, 1] and len(calls) == 1
+
+
+def test_closing_during_a_failed_apply_stays_open_and_says_why(win, dialogs):
+    shown(win)
+    win.pam.display.apply = lambda *a: (_ for _ in ()).throw(__import__("pam_profiles.mutter").mutter.DisplayError("refused"))
+    slow(win.pam, 0.3)
+    win._on_apply()
+    win.close()
+    assert spin(lambda: not win._applying)
+    spin(lambda: False, 0.1)
+    assert win.get_visible() and dialogs and "Not Applied" in dialogs[-1].get_heading()
+
+
+def test_shortcut_dialog_needs_super_ctrl_or_alt_and_inhibits_system_shortcuts(win):
+    shown(win)
+    d = ShortcutDialog(win, "Center only")
+
+    class Top:
+        calls = []
+
+        def inhibit_system_shortcuts(self, event):
+            self.calls.append("inhibit")
+
+        def restore_system_shortcuts(self):
+            self.calls.append("restore")
+    top = Top()
+    d._toplevel = lambda: top
+    d.present(win)
+    spin(lambda: False, 0.2)
+    assert top.calls == ["inhibit"]
+    d._key(None, Gdk.KEY_a, 0, Gdk.ModifierType.SHIFT_MASK)
+    assert d.message.get_visible() and win.keys["Center only"] == "<Super>F3"  # unchanged
+    d._key(None, Gdk.KEY_p, 0, Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)
+    assert win.keys["Center only"] == "<Control><Alt>p"
+    spin(lambda: False, 0.3)
+    assert top.calls == ["inhibit", "restore"]
+
+
+def test_moving_focus_in_the_sidebar_does_not_change_the_profile(win):
+    shown(win)
+    first = win.current
+    by_name(win.sidebar_list, first).grab_focus()
+    win.sidebar_list.emit("move-cursor", Gtk.MovementStep.DISPLAY_LINES, 1, False, False)
+    spin(lambda: False, 0.1)
+    assert win.current == first
+    assert win.sidebar_list.get_selected_row().profile_name == first
+    win.sidebar_list.get_focus_child().emit("activate")   # Enter / Space
+    assert win.current == "Center only"
+    assert win.sidebar_list.get_selected_row().profile_name == "Center only"
+
+
+def test_ctrl_arrow_moves_the_selected_screen_and_arrows_select(win):
+    shown(win)
+    right = win.profile().displays.logical_monitors[2].screens[0].screen
+    win.canvas.grab_focus()
+    while win.selected != right:
+        win.canvas._key(None, Gdk.KEY_Right, 0, 0)
+    win.canvas._key(None, Gdk.KEY_Down, 0, Gdk.ModifierType.CONTROL_MASK)
+    lms = win.pam.profile("Desk — 3 monitors").displays.logical_monitors
+    assert (lms[2].x, lms[2].y) == (3840, 200) and (lms[0].y, lms[1].y) == (0, 0)
+    assert win.selected == right
+
+
+def test_a_click_never_moves_a_screen(win):
+    shown(win)
+    right = win.profile().displays.logical_monitors[2].screens[0].screen
+    win._on_canvas_moved(right, 3840, 60, True)     # valid, but 60 px off its neighbour's top
+    before = win.pam.profile("Desk — 3 monitors").to_json()
+    c = win.canvas
+    s, ox, oy = c._view_now()
+    item = next(it for it in c.items if it.key == right)
+    px, py = ox + (item.rect.x + item.rect.w / 2) * s, oy + (item.rect.y + item.rect.h / 2) * s
+    c._drag_begin(None, px, py)
+    c._drag_update(None, 2, -2)                     # hand jitter during a click
+    c._drag_end(None, 2, -2)
+    assert win.pam.profile("Desk — 3 monitors").to_json() == before
+    assert win.selected == right
+
+
+def test_narrow_window_shows_the_profile_name(win):
+    shown(win, (360, 700))
+    assert spin(lambda: win.narrow_title.get_mapped())
+    assert win.narrow_title.get_label() == win.current
+    assert not win.title.get_visible()
+
+
+def test_mirrored_screens_can_each_be_selected_and_turned_off(win):
+    desk = win.profile()
+    lms = desk.displays.logical_monitors
+    left, right = lms[0].screens[0].screen, lms[2].screens[0].screen
+
+    def mirror(p):
+        a, b = p.displays.logical_monitors[0], p.displays.logical_monitors.pop(2)
+        a.screens.append(b.screens[0])
+    assert win.edit(mirror)
+    win.reload(select=win.current)
+    item = next(it for it in win.canvas.items if it.key == left)
+    assert item.members == (left, right) and "+ 1" in item.title
+    win._on_canvas_select(left)
+    assert len(win.mirror_rows) == 1
+    win._on_select_member(None, right)
+    assert win.selected == right and win.selected_title.get_label() == "Lenovo LI2364d"
+    win._on_turn_off(None)
+    stored = win.pam.profile("Desk — 3 monitors")
+    assert right not in editor.screen_ids(stored) and left in editor.screen_ids(stored)
+
+
+def test_an_edit_never_overwrites_a_newer_profile_from_outside(win):
+    win.pam.display = OnlyRogActive()
+    win.pam.save_current("Desk — 3 monitors", overwrite=True)   # `pam save-current ... --force`
+    newer = win.pam.profile("Desk — 3 monitors").to_json()
+    win.output_row.set_selected(0)                                # an edit on the old version
+    assert win.pam.profile("Desk — 3 monitors").to_json() == newer
+    assert spin(lambda: len(win.canvas.items) == 1)               # the window shows the newer one
+    win.output_row.set_selected(0)                                # now on the version shown
+    assert win.pam.profile("Desk — 3 monitors").audio_output is None
+
+
+def test_apply_after_an_outside_change_shows_it_first(win):
+    win.pam.display = OnlyRogActive()
+    win.pam.save_current("Desk — 3 monitors", overwrite=True)
+    win._on_apply()
+    assert not win._applying and win.pam.display.sent == []
+    assert len(win.canvas.items) == 1
+
+
+def test_audio_popup_marks_the_selected_device(win):
+    shown(win)
+    win.output_row.set_selected(2)
+    win.output_row.activate()
+    spin(lambda: False, 0.3)
+
+    def walk(w):
+        yield w
+        c = w.get_first_child()
+        while c is not None:
+            yield from walk(c)
+            c = c.get_next_sibling()
+    popovers = [w for w in walk(win.output_row) if isinstance(w, Gtk.Popover)]
+    assert popovers
+    marks = {}
+    for w in walk(popovers[0]):
+        if isinstance(w, Gtk.Label) and w.get_parent() and isinstance(w.get_parent().get_last_child(), Gtk.Image):
+            marks[w.get_label()] = w.get_parent().get_last_child().get_opacity()
+    assert marks["GA102 HDMI 2 (NVIDIA)"] == 1
+    assert sum(1 for v in marks.values() if v == 1) == 1
+    popovers[0].popdown()
+
+
+def test_demo_shortcuts_do_not_clash_with_gnome(win):
+    for name, key in win.keys.items():
+        assert win.shortcuts.clash(key, name, same_accel) is None
+
+
+def test_monitors_changed_waits_for_a_drag_and_reads_off_the_main_loop(win, monkeypatch):
+    shown(win)
+    win.MONITORS_SETTLE_MS = win.MONITORS_RETRY_MS = 20
+    real = win.pam.display.get_state
+    reads = []
+
+    def slow_state():
+        reads.append(1)
+        time.sleep(0.5)
+        return real()
+    win.pam.display.get_state = slow_state
+    win.canvas._drag = (0, win.canvas.items[0].rect)              # a drag in progress
+    win._monitors_changed()
+    spin(lambda: False, 0.3)
+    assert reads == [] and win.canvas.dragging                    # waited, drag untouched
+    win.canvas._drag = None
+    ticks = []
+    GLib.timeout_add(20, lambda: ticks.append(1) or True)
+    assert spin(lambda: reads and not win._monitors_reading and win._monitors_pending is None, 5)
+    assert len(ticks) >= 15                                       # main loop ran during the 0.5 s read
+
+
+def test_forget_a_remembered_screen_and_audio_device(win):
+    projector = next(k.screen for k in win.known.screens if k.screen.identity.vendor == "STK")
+    win.forget_screen(projector)
+    assert projector not in [k.screen for k in win.pam.known().screens]
+    assert projector not in [k.screen for k in win.known.screens]
+    win.forget_audio("output", "nonexistent")       # not remembered: nothing happens
+    from pam_profiles.store import KnownAudio
+    k = win.pam.known()
+    k.inputs.append(KnownAudio("alsa_input.gone", "Old Microphone"))
+    win.pam.store.save_known(k)
+    win.forget_audio("input", "alsa_input.gone")
+    assert "alsa_input.gone" not in [a.name for a in win.pam.known().inputs]
+    assert "alsa_input.gone" not in [a.name for a in win.known.inputs]
+
+
+def test_remembered_dialog_lists_only_devices_that_are_not_connected(win):
+    from pam_profiles.gui.window import RememberedDialog
+    from pam_profiles.store import KnownAudio
+    k = win.pam.known()
+    k.outputs.append(KnownAudio("alsa_output.gone", "Old Speakers"))
+    win.pam.store.save_known(k)
+    win.reload(select=win.current)
+    d = RememberedDialog(win)
+    titles = []
+    for g in d.groups:
+        i = 0
+        while (row := g.get_row(i) if hasattr(g, "get_row") else None) is not None:
+            titles.append(row.get_title())
+            i += 1
+    assert "Old Speakers" in titles and any("TV" in t for t in titles)
+    assert not any("ROG" in t for t in titles)          # connected: not offered
