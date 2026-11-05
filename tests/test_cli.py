@@ -309,3 +309,8 @@ def test_install_desktop_without_ceb_gui_says_so(monkeypatch, capsys):
     monkeypatch.setattr(desktop, "find_executable", lambda name: None)
     assert cli.main(["install-desktop"]) == 1
     assert "could not find the installed ceb-gui" in capsys.readouterr().err
+
+
+def test_unknown_option_gets_no_dash_name_hint(make_ceb, capsys):
+    code, _ = run(make_ceb(desk(1)), "apply", "desk", "--bogus")
+    assert code == 2 and "goes after --" not in capsys.readouterr().err

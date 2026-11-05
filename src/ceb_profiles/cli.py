@@ -146,7 +146,7 @@ def _usage_error(e: UsageError, args: list[str], notifier, on_terminal) -> int:
     e.parser.print_usage(sys.stderr)
     # No "ceb:" in the title: stderr adds it ("ceb: Wrong command: ..."); the notification shows "CEB".
     title, body = "Wrong command", f"{e} (command: ceb {' '.join(args)})".rstrip()
-    if "argument" in str(e) and any(a.startswith("-") and a not in _KNOWN_OPTIONS for a in args):
+    if "required" in str(e) and any(a.startswith("-") and a not in _KNOWN_OPTIONS for a in args):
         body += ". A profile name that starts with - goes after --, for example: ceb apply -- -work"
     terminal = sys.stderr.isatty() if on_terminal is None else on_terminal
     if terminal or "--no-notify" in args or "--dry-run" in args:
