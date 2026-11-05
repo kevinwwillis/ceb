@@ -13,7 +13,9 @@ Status: core library and command-line tool. The GTK window comes later.
 ## Install (development)
 
 Needs GNOME (Mutter), PipeWire or PulseAudio, and PyGObject from your distribution
-(`sudo apt install python3-gi`).
+(`sudo apt install python3-gi`, `sudo dnf install python3-gobject`). PyGObject is a system
+requirement, not a pip dependency, because pip would try to build it from source; the `gi` extra
+(`pip install '.[gi]'`) does that for those who want it.
 
 ```bash
 python3 -m venv --system-site-packages .venv   # system site packages for PyGObject
@@ -35,9 +37,10 @@ pam apply desk --allow-missing   # apply what is present, report what is skipped
 pam delete desk
 ```
 
-`pam apply` is meant for keyboard shortcuts: every failure shows as a desktop notification. Exit
-codes: 0 done, 1 failed or refused (nothing changed unless the message says "partly"), 3 applied
-with parts skipped (`--allow-missing`).
+`pam apply` is meant for keyboard shortcuts: every failure shows as a desktop notification, and so
+does a wrong command line when there is no terminal. Exit codes: 0 done, 1 failed or refused
+(nothing changed unless the message says "partly"), 2 wrong command line, 3 applied with parts
+skipped (`--allow-missing`).
 
 ## Library
 
