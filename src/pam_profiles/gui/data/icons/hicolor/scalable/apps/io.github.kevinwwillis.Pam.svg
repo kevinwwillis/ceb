@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Placeholder icon: three screens side by side, the middle one primary (star). -->
+  <rect x="4" y="12" width="120" height="104" rx="16" fill="#1a1a1c"/>
+  <rect x="12" y="42" width="34" height="24" rx="3" fill="#3a4a63" stroke="#6b85b3" stroke-width="2.5"/>
+  <rect x="47" y="38" width="34" height="32" rx="3" fill="#3a4a63" stroke="#ffffff" stroke-width="2.5"/>
+  <rect x="82" y="42" width="34" height="24" rx="3" fill="#2b2b2b" stroke="#888888" stroke-width="2.5" stroke-dasharray="4 3"/>
+  <path d="M64 46 l2.4 5 5.4 .6 -4 3.7 1.1 5.3 -4.9-2.7 -4.9 2.7 1.1-5.3 -4-3.7 5.4-.6z" fill="#f6d32d"/>
+  <path d="M30 84 h68" stroke="#3584e4" stroke-width="6" stroke-linecap="round"/>
+  <path d="M40 98 h48" stroke="#2ec27e" stroke-width="6" stroke-linecap="round"/>
+</svg>

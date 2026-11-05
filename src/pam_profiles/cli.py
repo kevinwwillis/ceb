@@ -50,13 +50,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="apply what is present and skip missing screens or audio devices (reported)")
     p.add_argument("--no-notify", action="store_true", help="no desktop notification on failure")
 
+    sub.add_parser("gui", help="open the PAM window (same as pam-gui; pam gui --help for its options)",
+                   add_help=False)
     p = sub.add_parser("delete", help="delete a profile")
     p.add_argument("name")
     return ap
 
 
 def main(argv=None, *, pam: Pam | None = None, notifier=desktop_notify) -> int:
-    opts = build_parser().parse_args(argv)
+    args = sys.argv[1:] if argv is None else list(argv)
+    if args[:1] == ["gui"]:  # `pam gui [--dry-run|--demo|...]` is `pam-gui`
+        from .gui import main as gui_main
+        return gui_main(args[1:])
+    opts = build_parser().parse_args(args)
     notify_failures = opts.command == "apply" and not opts.no_notify and not opts.dry_run
     try:
         pam = pam or Pam(store=Store(opts.config_dir))

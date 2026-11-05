@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=PAM
+GenericName=Display Profiles
+Comment=Switch screen layouts and audio devices with one key
+Exec=pam-gui
+Icon=io.github.kevinwwillis.Pam
+Terminal=false
+Categories=GTK;GNOME;Settings;HardwareSettings;
+Keywords=monitor;display;screen;layout;profile;audio;
+StartupNotify=true

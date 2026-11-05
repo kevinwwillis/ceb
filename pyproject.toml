@@ -23,9 +23,13 @@ dev = ["pytest>=7"]
 
 [project.scripts]
 pam = "pam_profiles.cli:main"
+pam-gui = "pam_profiles.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"pam_profiles.gui" = ["data/*.desktop", "data/icons/hicolor/scalable/apps/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
