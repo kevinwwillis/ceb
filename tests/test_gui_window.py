@@ -432,3 +432,14 @@ def test_remembered_dialog_lists_only_devices_that_are_not_connected(win):
             i += 1
     assert "Old Speakers" in titles and any("TV" in t for t in titles)
     assert not any("ROG" in t for t in titles)          # connected: not offered
+
+
+def test_a_screen_read_that_ends_after_the_window_closed_is_dropped(win):
+    shown(win)
+    win.MONITORS_SETTLE_MS = 1
+    real = win.pam.display.get_state
+    win.pam.display.get_state = lambda: (time.sleep(0.3), real())[1]
+    win._monitors_changed()
+    assert spin(lambda: win._monitors_reading)
+    win.close()
+    assert spin(lambda: not win._monitors_reading)   # the late result did not touch the closed window

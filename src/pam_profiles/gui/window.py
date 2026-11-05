@@ -66,6 +66,7 @@ class PamWindow(Adw.ApplicationWindow):
         self._updating = False
         self._applying = False
         self._close_after_apply = False
+        self._closed = False
         self._signal_id = None
         self._monitors_pending = None   # GLib source id of a deferred MonitorsChanged reload
         self._monitors_reading = False  # a worker thread is reading the screens and audio
@@ -937,6 +938,8 @@ class PamWindow(Adw.ApplicationWindow):
 
     def _monitors_read(self, state) -> bool:
         self._monitors_reading = False
+        if self._closed:
+            return False
         if isinstance(state, Exception):
             self.toast(f"Could not read the screens: {state}")
         elif self._busy():
@@ -953,6 +956,7 @@ class PamWindow(Adw.ApplicationWindow):
             self._close_after_apply = True
             self.toast("PAM closes when the switch is done")
             return True
+        self._closed = True
         if self._signal_id is not None:
             self._bus.signal_unsubscribe(self._signal_id)
             self._signal_id = None
