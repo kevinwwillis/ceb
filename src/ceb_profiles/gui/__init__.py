@@ -99,7 +99,7 @@ def main(argv=None) -> int:
         # In-memory shortcuts that never run; "ceb" only if the installed one cannot be found.
         shortcuts = Shortcuts(backend=Gio.memory_settings_backend_new(), command=ceb_command() or "ceb")
         seed(ceb, shortcuts, same_accel)
-        explicit = None
+        explicit = explicit_config_dir(opts.config_dir)
         # The background-watcher switch writes its autostart entry here, never to ~/.config.
         autostart_base = os.path.join(demo_dir, "config")
     else:
