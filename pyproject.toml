@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]  # 77: `license` as an SPDX string (PEP 639)
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pam-profiles"
+version = "0.1.0"
+description = "Display and audio profiles for GNOME: screens on/off, positions, primary screen, default audio output and input."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Kevin Willis" }]
+dependencies = [
+    # PulseAudio client API (libpulse via ctypes); talks to PipeWire through pipewire-pulse.
+    "pulsectl>=24.0",
+]
+# PyGObject (Gio D-Bus for org.gnome.Mutter.DisplayConfig and notifications) is a system
+# requirement, as for other GNOME apps: the distribution's python3-gi, or the GNOME Flatpak runtime.
+# It is not a pip dependency because pip would try to build it from source against the system's
+# GLib/GObject-Introspection headers. The `gi` extra installs it from PyPI for those who want that.
+
+[project.optional-dependencies]
+gi = ["PyGObject>=3.42"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+pam = "pam_profiles.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
