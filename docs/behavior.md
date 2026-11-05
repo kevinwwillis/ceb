@@ -120,35 +120,9 @@ libpulse) to read and set the default sink and source through pipewire-pulse:
 `$XDG_CONFIG_HOME/ceb/` (default `~/.config/ceb/`): `profiles.json` and `known.json`, both
 `{"version": 1, ...}`. Writes are atomic and locked. A file CEB cannot parse, one with values of the
 wrong type, or one written by a newer CEB, is reported and never overwritten. If either file is a
-symlink, CEB writes to the file it points to and the link stays. Before the rename the folder was
-`pam/`; see [Renamed from PAM](#renamed-from-pam).
+symlink, CEB writes to the file it points to and the link stays.
 
 Lock files: `.lock` in that folder for the files, and `$XDG_RUNTIME_DIR/ceb-apply.lock` (or
 `.apply.lock` in the config folder when there is no runtime folder) so only one profile switch runs
 at a time. CEB never follows a symlink there, never truncates them, and refuses one owned by
 another user.
-
-## Renamed from PAM
-
-The app was called PAM until 2026-11-05 (renamed because PAM already means Pluggable Authentication
-Modules on Linux). Two things carry over:
-
-- **Files.** When CEB first reads or writes its default folder `$XDG_CONFIG_HOME/ceb/` and that folder
-  does not exist, it looks in `$XDG_CONFIG_HOME/pam/`. If `profiles.json` and/or `known.json` there are
-  this app's (each a JSON object with an integer `version` no newer than CEB's, the list `profiles` or
-  `screens`, and loading without error), they are copied to `ceb/`; a symlinked file becomes a symlink
-  to the same file. If any of them is not ours, nothing is copied and `pam/` is not touched. The copy
-  is built in a temporary folder next to `ceb/` and renamed into place, so a failure leaves no `ceb/`
-  and the next run tries again (the command reports it as an error); if another CEB process created
-  `ceb/` meanwhile, that one wins. The files are **copied, not moved**: `pam/` stays as it was, as a
-  backup and for an older PAM still installed, and can be deleted by hand. CEB then uses only `ceb/`.
-  The copy is reported once: `ceb` prints a note on stderr (from a keyboard shortcut, `ceb apply`
-  shows it as a normal-urgency notification), the window shows a dialog. `--config-dir` never copies.
-- **Keyboard shortcuts.** Shortcuts PAM made run `pam apply <profile>`. A custom shortcut whose command
-  is exactly that counts as PAM's when its name is still "PAM: <profile>" or it sits at a path PAM made
-  (`.../custom-keybindings/pam<N>/`); one with neither is someone else's and is never changed. PAM's
-  count as the profile's shortcut everywhere (shown, changed, removed, not a clash with itself). When
-  the window opens it rewrites them in place to `ceb apply <profile>` named "CEB: <profile>", keeping
-  the key and the path, and says how many it updated. If the profile already has a `ceb apply`
-  shortcut, the old one is left as it is. Until the window has been opened once, PAM's shortcuts still
-  run `pam`, which works only while the old PAM is installed.

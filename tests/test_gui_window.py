@@ -443,36 +443,3 @@ def test_a_screen_read_that_ends_after_the_window_closed_is_dropped(win):
     assert spin(lambda: win._monitors_reading)
     win.close()
     assert spin(lambda: not win._monitors_reading)   # the late result did not touch the closed window
-
-
-def test_window_upgrades_pam_shortcuts_and_says_the_config_copy_once(tmp_path, app, dialogs, monkeypatch):
-    # A PAM-era config folder and a shortcut PAM made, both in throwaway places.
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    Store(tmp_path / "config" / "pam").save_profiles([])
-    backend = Gio.memory_settings_backend_new()
-    path = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/pam0/"
-    schema = Gio.SettingsSchemaSource.get_default().lookup("org.gnome.settings-daemon.plugins.media-keys.custom-keybinding", True)
-    if schema is None:
-        pytest.skip("GNOME's media-keys schemas are not installed")
-    entry = Gio.Settings.new_full(schema, backend, path)
-    entry.set_string("name", "PAM: desk")
-    entry.set_string("command", "pam apply desk")
-    entry.set_string("binding", "<Super>F7")
-    media = Gio.Settings.new_full(Gio.SettingsSchemaSource.get_default().lookup(
-        "org.gnome.settings-daemon.plugins.media-keys", True), backend, None)
-    media.set_strv("custom-keybindings", [path])
-
-    ceb = Ceb(display=DemoDisplay(), audio=DemoAudio(), store=Store())
-    w = CebWindow(app, ceb, Shortcuts(backend=backend, command="ceb"), demo=True)
-    try:
-        assert entry.get_string("command") == "ceb apply desk"
-        assert entry.get_string("name") == "CEB: desk"
-        assert w.keys == {"desk": "<Super>F7"}
-        assert spin(lambda: len(dialogs) == 1)
-        assert dialogs[0].get_heading() == "Settings Copied from PAM"
-        assert ceb.store.migration_notice is None
-        w.reload()
-        spin(lambda: False, 0.1)
-        assert len(dialogs) == 1                       # said once
-    finally:
-        w.destroy()
