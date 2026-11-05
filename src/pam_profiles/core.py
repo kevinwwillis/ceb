@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .audio import AudioBackend, AudioError, PulseAudioBackend
 from .model import (AudioRef, AudioState, DisplayLayout, DisplayState, Profile, ProfileLogicalMonitor,
-                    ProfileScreen)
+                    ProfileScreen, ScreenId)
 from .mutter import (METHOD_TEMPORARY, METHOD_VERIFY, DisplayBackend, DisplayError,
                      MutterDisplayConfig, StaleSerialError)
 from .planner import AudioPlan, DisplayPlan, Problem, plan_audio, plan_display
@@ -25,6 +25,10 @@ AUDIO_POLL_S = 0.25
 
 class PamError(Exception):
     """A request that cannot be done (unknown profile, name taken, nothing to save...)."""
+
+
+class ProfileChanged(PamError):
+    """The stored profile is not the one an edit was made on (put_profile's `expected`)."""
 
 
 @dataclass
@@ -166,18 +170,73 @@ class Pam:
         self.put_profile(profile, overwrite=overwrite)
         return profile
 
-    def put_profile(self, profile: Profile, *, overwrite: bool = True) -> None:
-        """Add or replace a profile (the GUI uses this after editing positions)."""
+    def put_profile(self, profile: Profile, *, overwrite: bool = True, expected: Profile | None = None) -> None:
+        """Add or replace a profile (the GUI uses this after editing positions).
+
+        `expected`: the stored profile the edit was made on. If the stored profile is no longer
+        that (someone ran `pam save-current --force` or edited the file meanwhile), nothing is
+        written and ProfileChanged is raised, so a newer version is never silently overwritten."""
         with self.store.locked():
             profiles = self.store.load_profiles()
             index = next((i for i, p in enumerate(profiles) if p.name == profile.name), None)
             if index is not None and not overwrite:
                 raise PamError(f"a profile named {profile.name!r} already exists")
+            if expected is not None:
+                stored = profiles[index] if index is not None else None
+                if stored is None or stored.to_json() != expected.to_json():
+                    raise ProfileChanged(f"profile {profile.name!r} was changed or removed outside this window")
             if index is None:
                 profiles.append(profile)
             else:
                 profiles[index] = profile
             self.store.save_profiles(profiles)
+
+    def rename_profile(self, old: str, new: str) -> None:
+        """Rename a profile in place (it keeps its position in the list), in one write."""
+        new = new.strip()
+        if not new:
+            raise PamError("a profile needs a name")
+        with self.store.locked():
+            profiles = self.store.load_profiles()
+            index = next((i for i, p in enumerate(profiles) if p.name == old), None)
+            if index is None:
+                raise PamError(f"no profile named {old!r}")
+            if new != old and any(p.name == new for p in profiles):
+                raise PamError(f"a profile named {new!r} already exists")
+            p = profiles[index]
+            profiles[index] = Profile(new, p.displays, p.audio_output, p.audio_input)
+            self.store.save_profiles(profiles)
+
+    def forget_screen(self, sid: ScreenId) -> bool:
+        """Remove a screen from the history (known.json). Profiles that use it keep it. A connected
+        screen is recorded again the next time PAM reads the screens. Returns False if it was not
+        remembered."""
+        with self.store.locked():
+            known = self.store.load_known()
+            kept = [s for s in known.screens if s.screen != sid]
+            if len(kept) == len(known.screens):
+                return False
+            known.screens = kept
+            self.store.save_known(known)
+            return True
+
+    def forget_audio(self, kind: str, name: str) -> bool:
+        """Remove an audio output (kind 'output') or input ('input') from the history, by node name.
+        Returns False if it was not remembered."""
+        if kind not in ("output", "input"):
+            raise ValueError(f"kind must be 'output' or 'input', not {kind!r}")
+        with self.store.locked():
+            known = self.store.load_known()
+            devices = known.outputs if kind == "output" else known.inputs
+            kept = [d for d in devices if d.name != name]
+            if len(kept) == len(devices):
+                return False
+            if kind == "output":
+                known.outputs = kept
+            else:
+                known.inputs = kept
+            self.store.save_known(known)
+            return True
 
     def delete_profile(self, name: str) -> None:
         with self.store.locked():

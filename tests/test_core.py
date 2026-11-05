@@ -3,7 +3,7 @@ import pytest
 from conftest import (HDMI_OUT, LENOVO, PROJECTOR, ROG, UNITEK_IN, UNITEK_OUT, WEBCAM_IN, FakeAudio,
                       desk, mon, reply)
 from pam_profiles.audio import AudioError
-from pam_profiles.core import PamError
+from pam_profiles.core import PamError, ProfileChanged
 from pam_profiles.mutter import METHOD_TEMPORARY, METHOD_VERIFY, DisplayError, StaleSerialError
 
 M60 = "1920x1080@60.000"
@@ -489,3 +489,61 @@ def test_hdmi_audio_missing_while_screens_stay_on_refuses(make_pam):
     pam.audio.state.outputs = [UNITEK_OUT]       # nothing is turned on, so it will not appear
     result = pam.apply("desk")
     assert result.refused and pam.display.calls == []
+
+
+def _names(pam):
+    return [p.name for p in pam.profiles()]
+
+
+def test_rename_keeps_the_position_and_writes_once(make_pam, monkeypatch):
+    pam = make_pam(desk(1))
+    for name in ("a", "b", "c"):
+        pam.save_current(name)
+    writes = []
+    real = pam.store.save_profiles
+    monkeypatch.setattr(pam.store, "save_profiles", lambda ps: (writes.append(1), real(ps)))
+    pam.rename_profile("b", "bee")
+    assert _names(pam) == ["a", "bee", "c"] and writes == [1]
+    with pytest.raises(PamError):
+        pam.rename_profile("a", "c")
+    with pytest.raises(PamError):
+        pam.rename_profile("nope", "x")
+    assert _names(pam) == ["a", "bee", "c"]
+
+
+def test_put_profile_with_expected_refuses_a_newer_stored_version(make_pam):
+    import copy
+    pam = make_pam(desk(1))
+    pam.save_current("desk")
+    shown = pam.profile("desk")
+    before = copy.deepcopy(shown)
+    pam.display.set(desk(2))
+    pam.save_current("desk", overwrite=True)          # `pam save-current desk --force` meanwhile
+    newer = pam.profile("desk").to_json()
+    shown.audio_output = None
+    with pytest.raises(ProfileChanged):
+        pam.put_profile(shown, expected=before)
+    assert pam.profile("desk").to_json() == newer
+    fresh = pam.profile("desk")
+    fresh_before = copy.deepcopy(fresh)
+    fresh.audio_output = None
+    pam.put_profile(fresh, expected=fresh_before)
+    assert pam.profile("desk").audio_output is None
+
+
+def test_forget_removes_a_screen_or_audio_device_from_the_history(make_pam):
+    pam = make_pam(reply([mon("HDMI-1", PROJECTOR)]))
+    pam.current()
+    proj = pam.known().screens[0].screen
+    pam.display.set(desk(1))
+    pam.current()
+    assert proj in [s.screen for s in pam.known().screens]
+    assert pam.forget_screen(proj) is True
+    assert proj not in [s.screen for s in pam.known().screens]
+    assert pam.forget_screen(proj) is False
+    out = pam.known().outputs[0].name
+    assert pam.forget_audio("output", out) is True
+    assert out not in [a.name for a in pam.known().outputs]
+    assert pam.known().inputs  # inputs untouched
+    with pytest.raises(ValueError):
+        pam.forget_audio("speaker", out)
