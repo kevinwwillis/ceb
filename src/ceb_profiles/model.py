@@ -23,7 +23,10 @@ class Identity:
         return cls(vendor.strip(), product.strip(), serial.strip())
 
     def describe(self) -> str:
-        return f"{self.vendor} {self.product}, serial {self.serial or '(none)'}"
+        # Some monitors repeat the vendor code in the product name ('LEN' + 'LEN LI2364d').
+        product = self.product
+        name = product if self.vendor and product.split(" ", 1)[0] == self.vendor else f"{self.vendor} {product}"
+        return f"{name.strip()}, serial {self.serial or '(none)'}"
 
 
 @dataclass(frozen=True)

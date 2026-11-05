@@ -77,6 +77,23 @@ def default_config_dir() -> Path:
     return Path(base) / "ceb"
 
 
+def explicit_config_dir(config_dir: str | os.PathLike | None) -> str | None:
+    """The config folder as an absolute path when it is not the default one, else None.
+
+    Commands CEB writes for later (keyboard shortcuts, the background watcher's autostart entry)
+    carry `--config-dir` only when this is not None, so a store outside the default folder is the
+    one they use."""
+    if not config_dir:
+        return None
+    path = Path(config_dir).expanduser().absolute()
+    try:
+        if path.resolve() == default_config_dir().resolve():
+            return None
+    except OSError:
+        pass
+    return str(path)
+
+
 @dataclass
 class KnownMode:
     width: int

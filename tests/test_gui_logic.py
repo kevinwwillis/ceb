@@ -196,3 +196,48 @@ def test_ceb_gui_exits_with_a_message_on_old_libadwaita(monkeypatch, capsys):
     monkeypatch.setattr(gui, "_adw_version", lambda: (1, 7, 0))
     assert gui.main([]) == 1  # before anything real is opened
     assert "libadwaita 1.8" in capsys.readouterr().err
+
+
+def test_missing_pygobject_message_says_the_cli_needs_it_too():
+    from ceb_profiles.gui import version_problem
+    text = version_problem(None, have_gi=False)
+    assert "works without" not in text
+    assert "Both `ceb` and `ceb-gui` need PyGObject" in text
+    assert "sudo apt install python3-gi" in text and "sudo dnf install python3-gobject" in text
+
+
+def test_demo_removes_its_temp_folder_on_exit(tmp_path, monkeypatch):
+    """`ceb-gui --demo` with GTK stubbed out: the folder it makes is gone when it returns."""
+    import tempfile
+
+    import ceb_profiles.gui as gui
+    made = []
+    real = tempfile.mkdtemp
+
+    def mkdtemp(**kw):
+        made.append(real(dir=tmp_path, **kw))
+        return made[-1]
+    monkeypatch.setattr(gui.tempfile, "mkdtemp", mkdtemp)
+    monkeypatch.setattr(gui, "_adw_version", lambda: (1, 8, 0))
+
+    class App:
+        def __init__(self, **kw):
+            pass
+
+        def connect(self, *a):
+            pass
+
+        def run(self, argv):
+            import os
+            assert os.path.isdir(made[0])
+            return 0
+
+        def quit(self):
+            pass
+    import gi
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw
+    monkeypatch.setattr(Adw, "Application", App)
+    assert gui.main(["--demo"]) == 0
+    assert made and not __import__("os").path.exists(made[0])

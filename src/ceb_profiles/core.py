@@ -295,7 +295,7 @@ class Ceb:
         if history_error:
             result.notes.append(history_error)
 
-        dplan = plan_display(profile.displays, display_state) if profile.displays else None
+        dplan = plan_display(profile.displays, display_state, self._screen_names()) if profile.displays else None
         aplan = plan_audio(profile, audio_state) if audio_state is not None else AudioPlan(None, None, [])
         awaited = _awaited_audio(profile, aplan, dplan, display_state)
         if awaited:
@@ -352,6 +352,13 @@ class Ceb:
                 setattr(result, f"applied_{kind}", True)
             except AudioError as e:
                 result.errors.append(str(e))
+
+    def _screen_names(self) -> dict[ScreenId, str]:
+        """Remembered display names, for messages (an unreadable history gives none)."""
+        try:
+            return {ks.screen: ks.display_name for ks in self.store.load_known().screens if ks.display_name}
+        except StoreError:
+            return {}
 
     def _wait_for_audio(self, awaited: list[tuple[str, AudioRef]]) -> set[AudioRef]:
         """Poll the audio server until every awaited device is present or the wait is over. Returns

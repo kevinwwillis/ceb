@@ -1,6 +1,6 @@
 # How CEB finds screens and audio devices, and what it does when one is missing
 
-Status: core library and CLI, 2026-11-05.
+Status: core library, CLI and window, 2026-11-05.
 
 ## Screens are found by what they are, not by port
 
@@ -47,9 +47,17 @@ Limits (no data can fix these):
 
 ## Remembered screens and audio devices
 
-Every time CEB reads the screens or audio devices (list, save, apply; the window also on Mutter's
-`MonitorsChanged` signal, 0.3 s later, in a background thread, and not while a screen is being
-dragged or a popover is open), it records each one in `known.json`: identity and twin number,
+Every time CEB reads the screens or audio devices, it records each one in `known.json`. It reads
+them on `ceb list`, `save-current` and `apply`; in the window at start and on Mutter's
+`MonitorsChanged` signal or an audio server device event (a sink, source or card appearing or going
+away, or the defaults changing; pulsectl event subscription in a background thread), 0.3 s later,
+in a background thread, and not while a screen is being dragged or a popover is open; and in `ceb
+watch`, the background watcher, on the same events 1 s after the last one. `ceb watch` runs only
+when started, or at every login when the window's Main menu > Remember Screens in the Background is
+on (an autostart entry, `~/.config/autostart/io.github.kevinwwillis.Ceb.Watch.desktop`, running the
+absolute path of `ceb`, with `--config-dir` when the profiles are not in the default folder). One
+watcher runs per config folder (`$XDG_RUNTIME_DIR/ceb-watch-<hash>.lock` holds its process id); it
+ends on SIGTERM, SIGINT or SIGHUP and when the session's D-Bus connection closes. The record holds: identity and twin number,
 display name, all modes, the last port and GPU, first and last seen. Entries are never removed
 automatically, so the GUI can show and place screens that are not connected. They are removed only
 when asked (`Ceb.forget_screen`, `Ceb.forget_audio`; in the window, Remembered Devices > Forget,
@@ -120,7 +128,9 @@ libpulse) to read and set the default sink and source through pipewire-pulse:
 `$XDG_CONFIG_HOME/ceb/` (default `~/.config/ceb/`): `profiles.json` and `known.json`, both
 `{"version": 1, ...}`. Writes are atomic and locked. A file CEB cannot parse, one with values of the
 wrong type, or one written by a newer CEB, is reported and never overwritten. If either file is a
-symlink, CEB writes to the file it points to and the link stays.
+symlink, CEB writes to the file it points to and the link stays. If `profiles.json` holds two
+profiles with the same name (only possible by editing it by hand), CEB uses the first one and the
+window says so in its banner.
 
 Lock files: `.lock` in that folder for the files, and `$XDG_RUNTIME_DIR/ceb-apply.lock` (or
 `.apply.lock` in the config folder when there is no runtime folder) so only one profile switch runs

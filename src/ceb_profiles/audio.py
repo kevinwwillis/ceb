@@ -18,6 +18,7 @@ WirePlumber moves streams that follow the default.
 """
 from __future__ import annotations
 
+import threading
 from typing import Protocol
 
 from .model import AudioDevice, AudioState
@@ -75,6 +76,13 @@ class PulseAudioBackend:
     def set_default_input(self, name: str) -> None:
         self._set_default(name, "source")
 
+    def watch(self, callback) -> "AudioEvents":
+        """Call `callback()` (from a background thread) whenever an audio device appears or goes
+        away, or the default device changes. Returns the running watcher; stop it with .stop()."""
+        events = AudioEvents(callback, self.CLIENT_NAME + "-events")
+        events.start()
+        return events
+
     def _set_default(self, name: str, kind: str) -> None:
         pulse = self._connect()
         try:
@@ -89,3 +97,86 @@ class PulseAudioBackend:
             raise AudioError(f"could not set the default {kind} to {name}: {e}") from e
         finally:
             pulse.close()
+
+
+class AudioEvents:
+    """The audio server's device events, in a background thread (pulsectl event subscription).
+
+    `callback()` is called from that thread, never from libpulse's own callback, after a sink or
+    source (output or input), or a card, appears or goes away, or the server's defaults change.
+    Volume changes and streams are not subscribed to. The thread waits in poll() and wakes at
+    least every LISTEN_S to check whether it was stopped, so it costs no CPU while nothing
+    happens. If the audio server is not running or restarts, it reconnects (after 1 s, doubling to
+    at most 30 s) and calls `callback()` once it is connected again, so nothing is missed."""
+
+    LISTEN_S = 2.0
+    RETRY_MAX_S = 30.0
+
+    def __init__(self, callback, client_name: str = "ceb-events", pulse_factory=None):
+        self.callback = callback
+        self.client_name = client_name
+        self._pulse_factory = pulse_factory
+        self._stop = threading.Event()
+        self._pulse = None
+        self._fired = False
+        self.thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self.thread = threading.Thread(target=self._run, name="ceb-audio-events", daemon=True)
+        self.thread.start()
+
+    def stop(self, timeout: float | None = None) -> None:
+        self._stop.set()
+        pulse = self._pulse
+        if pulse is not None:
+            try:
+                pulse.event_listen_stop()
+            except Exception:  # already closed: the loop ends within LISTEN_S anyway
+                pass
+        if self.thread is not None and timeout is not None:
+            self.thread.join(timeout)
+
+    def _connect(self):
+        if self._pulse_factory is not None:
+            return self._pulse_factory()
+        import pulsectl
+        return pulsectl.Pulse(self.client_name, connect=True)
+
+    def _on_event(self, ev) -> None:
+        if (ev.facility in ("sink", "source", "card") and ev.t in ("new", "remove")) or (
+                ev.facility == "server" and ev.t == "change"):
+            self._fired = True
+            import pulsectl
+            raise pulsectl.PulseLoopStop  # leave event_listen; the callback runs outside libpulse
+
+    def _run(self) -> None:
+        delay, connected_before = 1.0, False
+        while not self._stop.is_set():
+            try:
+                pulse = self._connect()
+            except Exception:  # no server (yet), or libpulse/pulsectl missing
+                self._stop.wait(delay)
+                delay = min(delay * 2, self.RETRY_MAX_S)
+                continue
+            delay = 1.0
+            self._pulse = pulse
+            try:
+                pulse.event_mask_set("sink", "source", "card", "server")
+                pulse.event_callback_set(self._on_event)
+                if connected_before:
+                    self.callback()  # the server restarted: devices may have changed meanwhile
+                connected_before = True
+                while not self._stop.is_set():
+                    self._fired = False
+                    pulse.event_listen(timeout=self.LISTEN_S)
+                    if self._fired and not self._stop.is_set():
+                        self.callback()
+            except Exception:  # disconnected (pulsectl.PulseDisconnected) or a failed call
+                pass
+            finally:
+                self._pulse = None
+                try:
+                    pulse.close()
+                except Exception:
+                    pass
+            self._stop.wait(delay)

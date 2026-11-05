@@ -5,7 +5,12 @@ Monitor and audio data copied from GetCurrentState and the audio server of a rea
 2026-11-05 (modes shortened)."""
 from __future__ import annotations
 
-import pytest
+import os
+
+# Before anything loads Gio: no test may write the user's real gsettings (keyboard shortcuts).
+os.environ["GSETTINGS_BACKEND"] = "memory"
+
+import pytest  # noqa: E402
 
 from ceb_profiles.audio import AudioError
 from ceb_profiles.core import Ceb
@@ -140,11 +145,13 @@ class FakeAudio:
 
 @pytest.fixture(autouse=True)
 def private_dirs(tmp_path, monkeypatch):
-    """Keep every test away from the real ~/.config/ceb and $XDG_RUNTIME_DIR."""
+    """Keep every test away from the real ~/.config (ceb, autostart), ~/.local/share and
+    $XDG_RUNTIME_DIR."""
     runtime = tmp_path / "runtime"
     runtime.mkdir(mode=0o700)
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     return runtime
 
 
