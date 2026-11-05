@@ -106,7 +106,8 @@ def main(argv=None, *, pam: Pam | None = None, notifier=desktop_notify, on_termi
 
 def _usage_error(e: UsageError, args: list[str], notifier, on_terminal) -> int:
     e.parser.print_usage(sys.stderr)
-    title, body = "pam: wrong command", f"{e} (command: pam {' '.join(args)})".rstrip()
+    # No "pam:" in the title: stderr adds it ("pam: Wrong command: ..."); the notification shows "PAM".
+    title, body = "Wrong command", f"{e} (command: pam {' '.join(args)})".rstrip()
     terminal = sys.stderr.isatty() if on_terminal is None else on_terminal
     if terminal or "--no-notify" in args or "--dry-run" in args:
         print(f"pam: {title}: {body}", file=sys.stderr)

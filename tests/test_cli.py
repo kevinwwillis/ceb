@@ -187,3 +187,17 @@ def test_list_with_corrupt_profiles_still_lists_screens(make_pam, capsys):
     assert run(pam, "list")[0] == 1
     out, err = capsys.readouterr()
     assert "connected      HDMI-1" in out and "does not hold a JSON object" in err
+
+
+def test_usage_error_message_has_one_pam_prefix(make_pam, capsys):
+    from pam_profiles import notify
+    assert run(make_pam(desk(1)), "aply", on_terminal=True)[0] == 2
+    err = capsys.readouterr().err
+    assert "pam: pam:" not in err and "pam: wrong command: " in err.lower()
+    shown = []
+
+    def notifier(title, body, *, critical=True):
+        shown.append(title)
+        return notify.notify(title, body, critical=critical, senders=[])
+    assert cli.main(["aply"], pam=make_pam(desk(1)), notifier=notifier, on_terminal=False) == 2
+    assert "pam: pam:" not in capsys.readouterr().err and shown == ["Wrong command"]
