@@ -98,6 +98,9 @@ class ConnectedMonitor:
     gpu: str | None = None  # PCI address of its card, when it could be found
     twin: int = 0
     twin_count: int = 1
+    # True when this monitor's twins were ordered by port name only because the GPU of some (not
+    # all) of them could not be read; the planner reports it as a note.
+    twin_order_without_gpu: bool = False
 
     @property
     def screen_id(self) -> ScreenId:
@@ -242,6 +245,8 @@ class Profile:
     @classmethod
     def from_json(cls, d: dict) -> "Profile":
         audio = d.get("audio") or {}
+        if not isinstance(d["name"], str):
+            raise TypeError(f"profile name {d['name']!r} is not a string")
         return cls(d["name"],
                    DisplayLayout.from_json(d["displays"]) if d.get("displays") else None,
                    AudioRef.from_json(audio.get("output")), AudioRef.from_json(audio.get("input")))

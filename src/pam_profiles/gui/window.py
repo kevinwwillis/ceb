@@ -244,9 +244,18 @@ class PamWindow(Adw.ApplicationWindow):
         except AudioError as e:
             self.audio_state = None
             problems.append(f"Could not read the audio devices: {e}")
+        # Grows the history of every screen and audio device seen (docs/behavior.md). A history
+        # that cannot be read or written is reported, and the window keeps working without it.
+        history_error = self.pam.observe_best_effort(self.display_state, self.audio_state)
+        if history_error:
+            problems.append(history_error)
         try:
-            # Grows the history of every screen and audio device seen (docs/behavior.md).
-            self.known = self.pam.observe(self.display_state, self.audio_state)
+            self.known = self.pam.known()
+        except StoreError as e:
+            self.known = Known()
+            if not history_error:
+                problems.append(str(e))
+        try:
             self.profiles = self.pam.profiles()
         except StoreError as e:
             problems.append(str(e))
@@ -574,7 +583,7 @@ class PamWindow(Adw.ApplicationWindow):
                 self.pam.save_current(name)
                 note = ""
             except PamError as e:
-                if "audio" not in str(e).lower():
+                if "--no-audio" not in str(e):  # only an audio read failure: save the screens alone
                     self.error("Could Not Create the Profile", str(e))
                     return
                 try:
@@ -697,18 +706,26 @@ class PamWindow(Adw.ApplicationWindow):
             self.error(f"“{name}” Not Applied", f"{type(result).__name__}: {result}")
             return False
         r: ApplyResult = result
-        test = " (test only: nothing changed)" if r.dry_run else ""
+        changed = r.applied_display or r.applied_output or r.applied_input
+        blocked = any(pr.blocking_always for pr in r.problems)
         if r.ok:
-            self.toast(f"Applied “{name}”{test}" if not r.dry_run else
-                       f"GNOME accepts “{name}”; test mode, nothing changed")
-        elif r.goes_ahead and not r.errors:
-            self.error(f"“{name}” Applied With Parts Skipped{test}", _bullets(r.summary_lines()))
-        elif r.problems and not r.errors and not any(pr.blocking_always for pr in r.problems) and not allow_missing:
+            self.toast(f"GNOME accepts “{name}”; test mode, nothing changed" if r.dry_run else f"Applied “{name}”")
+        elif changed:
+            # Something was switched: never offer "Apply the rest" now. This includes an audio
+            # device (HDMI audio) that did not appear after the screens changed.
+            skipped = allow_missing and not r.errors
+            head = f"“{name}” Applied With Parts Skipped" if skipped else f"“{name}” Only Partly Applied"
+            self.error(head, _bullets(r.summary_lines()))
+        elif r.dry_run and allow_missing and r.goes_ahead and not r.errors:
+            self.error(f"GNOME Accepts the Rest of “{name}”",
+                       "Test mode: nothing was changed. Would be skipped:\n\n" + _bullets(r.summary_lines()))
+        elif r.problems and not r.errors and not blocked and not allow_missing:
             self._ask_apply_rest(name, r)
         else:
-            changed = r.applied_display or r.applied_output or r.applied_input
-            head = f"“{name}” Only Partly Applied" if changed else f"“{name}” Not Applied"
-            self.error(head, ("" if changed else "Nothing was changed.\n\n") + _bullets(r.summary_lines()))
+            self.error(f"“{name}” Not Applied", "Nothing was changed.\n\n" + _bullets(r.summary_lines()))
+        for note in r.notes:
+            if note.startswith("history not updated"):
+                self.toast(note)
         self.reload(select=self.current)
         return False
 

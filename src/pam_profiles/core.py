@@ -5,6 +5,7 @@ import fcntl
 import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .audio import AudioBackend, AudioError, PulseAudioBackend
 from .model import (AudioRef, AudioState, DisplayLayout, DisplayState, Profile, ProfileLogicalMonitor,
@@ -12,9 +13,14 @@ from .model import (AudioRef, AudioState, DisplayLayout, DisplayState, Profile, 
 from .mutter import (METHOD_TEMPORARY, METHOD_VERIFY, DisplayBackend, DisplayError,
                      MutterDisplayConfig, StaleSerialError)
 from .planner import AudioPlan, DisplayPlan, Problem, plan_audio, plan_display
-from .store import Known, Store, StoreError
+from .store import Known, Store, StoreError, open_lock_file
 
 APPLY_LOCK_WAIT_S = 40
+# An HDMI/DisplayPort audio output can appear only once its screen is on. When a profile turns a
+# screen on and needs such a device that is not present yet, PAM applies the screens first and
+# then waits up to this long for the device (it is never replaced by another one).
+AUDIO_APPEAR_WAIT_S = 5.0
+AUDIO_POLL_S = 0.25
 
 
 class PamError(Exception):
@@ -62,6 +68,12 @@ class Pam:
         self.display = display or MutterDisplayConfig()
         self.audio = audio or PulseAudioBackend()
         self.store = store or Store()
+        self.audio_appear_wait_s = AUDIO_APPEAR_WAIT_S
+        # Set by current() and apply(): why the history could not be updated, or None. Updating the
+        # history is best-effort; it never stops listing, saving or applying.
+        self.last_history_error: str | None = None
+        self._sleep = time.sleep
+        self._clock = time.monotonic
 
     # ------------------------------------------------------------ reading
 
@@ -92,9 +104,21 @@ class Pam:
                 self.store.save_known(known)
             return known
 
+    def observe_best_effort(self, display_state: DisplayState | None = None,
+                            audio_state: AudioState | None = None) -> str | None:
+        """observe(), but a history that cannot be read or written (corrupt file, read-only or full
+        disk) is returned as a message instead of raised. Also stored in last_history_error."""
+        try:
+            self.observe(display_state, audio_state)
+            self.last_history_error = None
+        except (StoreError, OSError) as e:
+            self.last_history_error = f"history not updated: {e}"
+        return self.last_history_error
+
     def current(self, *, need_audio: bool = True) -> tuple[DisplayState, AudioState | None, list[str]]:
         """Read displays and audio, record both in the history. Audio failures are returned as
-        errors rather than raised, so screens can still be listed."""
+        errors rather than raised, so screens can still be listed. A history that cannot be updated
+        is not an error here; see last_history_error. Raises DisplayError if Mutter cannot be read."""
         errors = []
         display_state = self.display.get_state()
         audio_state = None
@@ -103,7 +127,7 @@ class Pam:
                 audio_state = self.audio.snapshot()
             except AudioError as e:
                 errors.append(str(e))
-        self.observe(display_state, audio_state)
+        self.observe_best_effort(display_state, audio_state)
         return display_state, audio_state, errors
 
     # ------------------------------------------------------------ saving
@@ -168,13 +192,23 @@ class Pam:
     def apply(self, name: str, *, dry_run: bool = False, allow_missing: bool = False) -> ApplyResult:
         """Apply a profile. Without allow_missing, any missing screen, mode or audio device means
         nothing is changed. A dry run plans and asks Mutter to verify the layout (method 0) without
-        changing anything."""
+        changing anything.
+
+        Screens are applied before audio. A display-audio device (HDMI/DisplayPort) that is missing
+        while the profile turns a screen on is waited for after the screens change (up to
+        audio_appear_wait_s); if it does not appear it is reported, never replaced."""
         profile = self.profile(name)
         result = ApplyResult(profile=name, dry_run=dry_run, allow_missing=allow_missing)
-        lock = None if dry_run else _apply_lock()
-        if lock is False:
-            result.errors.append(f"another profile switch is still running after {APPLY_LOCK_WAIT_S} s")
-            return result
+        lock = None
+        if not dry_run:
+            try:
+                lock = _apply_lock(self.store.dir)
+            except StoreError as e:
+                result.errors.append(f"cannot take the apply lock: {e}")
+                return result
+            if lock is False:
+                result.errors.append(f"another profile switch is still running after {APPLY_LOCK_WAIT_S} s")
+                return result
         try:
             self._apply(profile, result, dry_run, allow_missing, retry_stale=True)
         finally:
@@ -198,13 +232,18 @@ class Pam:
                 result.errors.append(str(e))
                 if not allow_missing:
                     return
-        try:
-            self.observe(display_state, audio_state)
-        except StoreError as e:
-            result.notes.append(f"history not updated: {e}")
+        history_error = self.observe_best_effort(display_state, audio_state)
+        if history_error:
+            result.notes.append(history_error)
 
         dplan = plan_display(profile.displays, display_state) if profile.displays else None
         aplan = plan_audio(profile, audio_state) if audio_state is not None else AudioPlan(None, None, [])
+        awaited = _awaited_audio(profile, aplan, dplan, display_state)
+        if awaited:
+            aplan.problems = [p for p in aplan.problems if p.kind not in {f"missing_{k}" for k, _ in awaited}]
+            for kind, ref in awaited:
+                result.notes.append(f"audio {kind} {ref.describe()} is not present yet; it may appear when "
+                                    f"the screens change, PAM waits up to {self.audio_appear_wait_s:g} s for it")
         result.display_plan, result.audio_plan = dplan, aplan
         result.problems = (dplan.problems if dplan else []) + aplan.problems
         if dplan:
@@ -223,7 +262,8 @@ class Pam:
                     result.applied_display = True
             except StaleSerialError:
                 if retry_stale:  # the monitors changed under us; read again and re-plan once
-                    result.problems, result.notes = [], []
+                    result.problems, result.notes, result.errors = [], [], []
+                    result.display_plan = result.audio_plan = None
                     self._apply(profile, result, dry_run, allow_missing, retry_stale=False)
                     return
                 result.errors.append("the screens kept changing while applying; try again")
@@ -234,6 +274,16 @@ class Pam:
 
         if dry_run:
             return
+        if awaited:
+            missing = self._wait_for_audio(awaited)
+            for kind, ref in awaited:
+                if ref in missing:
+                    problem = Problem(f"missing_{kind}", f"audio {kind} {ref.describe()} is not present "
+                                      f"(waited {self.audio_appear_wait_s:g} s after the screens changed)")
+                    aplan.problems.append(problem)
+                    result.problems.append(problem)
+                else:
+                    setattr(aplan, kind, ref)
         for kind, ref, setter in (("output", aplan.output, self.audio.set_default_output),
                                   ("input", aplan.input, self.audio.set_default_input)):
             if ref is None:
@@ -244,6 +294,25 @@ class Pam:
             except AudioError as e:
                 result.errors.append(str(e))
 
+    def _wait_for_audio(self, awaited: list[tuple[str, AudioRef]]) -> set[AudioRef]:
+        """Poll the audio server until every awaited device is present or the wait is over. Returns
+        the devices still missing."""
+        deadline = self._clock() + self.audio_appear_wait_s
+        missing = {ref for _, ref in awaited}
+        while True:
+            try:
+                state = self.audio.snapshot()
+            except AudioError:
+                state = None
+            if state is not None:
+                present = {d.name for d in state.outputs} | {d.name for d in state.inputs}
+                if any(ref.name in present for ref in missing):
+                    self.observe_best_effort(None, state)
+                missing = {ref for ref in missing if ref.name not in present}
+            if not missing or self._clock() >= deadline:
+                return missing
+            self._sleep(AUDIO_POLL_S)
+
 
 def _ref(devices, name):
     if not name:
@@ -252,10 +321,44 @@ def _ref(devices, name):
     return AudioRef(name, dev.description if dev else "")
 
 
-def _apply_lock():
-    """One switch at a time (a fast double key press). Returns the held file, or False on timeout."""
-    path = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", f"pam-apply-{os.getuid()}.lock")
-    handle = open(path, "w")
+_DISPLAY_AUDIO_HINTS = ("hdmi", "displayport")
+
+
+def _awaited_audio(profile: Profile, aplan: AudioPlan, dplan: DisplayPlan | None,
+                   display_state: DisplayState | None) -> list[tuple[str, AudioRef]]:
+    """Missing audio devices that may appear once the screens change: HDMI/DisplayPort audio (by
+    node name or description) when the plan turns on a screen that is off now."""
+    if dplan is None or display_state is None:
+        return []
+    active = {c for lm in display_state.logical_monitors for c in lm.connectors}
+    if all(m.connector in active for lm in dplan.logical_monitors for m in lm.monitors):
+        return []
+    out = []
+    kinds = {p.kind for p in aplan.problems}
+    for kind, ref in (("output", profile.audio_output), ("input", profile.audio_input)):
+        if ref is not None and f"missing_{kind}" in kinds:
+            text = f"{ref.name} {ref.description}".lower()
+            if any(h in text for h in _DISPLAY_AUDIO_HINTS):
+                out.append((kind, ref))
+    return out
+
+
+def _apply_lock(fallback_dir: str | os.PathLike):
+    """One switch at a time (a fast double key press). Returns the held file, or False on timeout.
+
+    The lock lives in $XDG_RUNTIME_DIR (private to the user), or else in PAM's own config folder;
+    never in a shared folder such as /tmp. It is opened without following symlinks or truncating
+    (store.open_lock_file); a problem with it raises StoreError."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime and os.path.isdir(runtime):
+        path = Path(runtime) / "pam-apply.lock"
+    else:
+        try:
+            Path(fallback_dir).mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise StoreError(f"could not create {fallback_dir}: {e.strerror or e}") from e
+        path = Path(fallback_dir) / ".apply.lock"
+    handle = open_lock_file(path)
     deadline = time.monotonic() + APPLY_LOCK_WAIT_S
     while True:
         try:

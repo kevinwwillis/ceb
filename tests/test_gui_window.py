@@ -119,3 +119,43 @@ def test_set_shortcut_refuses_a_clash_and_sets_a_free_one(win):
     assert win.keys["Center only"] == "<Control><Alt>p"
     assert win.set_shortcut("Center only", None) is None
     assert "Center only" not in win.keys
+
+
+class OnlyRogActive(DemoDisplay):
+    """The desk with only the ROG on, so applying "Desk" turns screens on (HDMI audio may follow)."""
+
+    def get_state(self):
+        from pam_profiles.gui.demo import DESK
+        from pam_profiles.mutter import parse_current_state
+        specs = {m[0][0]: m[0] for m in DESK}
+        return parse_current_state((self.serial, DESK, [(0, 0, 1.0, 0, True, [specs["HDMI-3"]], {})],
+                                    {"layout-mode": 1, "supports-changing-layout-mode": False}))
+
+
+def test_late_hdmi_audio_waits_off_the_main_loop_and_never_offers_apply_the_rest(win):
+    from pam_profiles.model import AudioRef
+    shown = []
+    win.error = lambda head, body: shown.append(("error", head, body))
+    win._ask_apply_rest = lambda name, r: shown.append(("ask", name))
+    win.pam.display = OnlyRogActive()
+    p = win.pam.profile("Desk — 3 monitors")
+    p.audio_output = AudioRef("alsa_output.pci-0000_2d_00.1.hdmi-stereo-extra9", "GA102 HDMI 9")
+    win.pam.put_profile(p)
+    win.pam.audio_appear_wait_s = 1.0
+
+    ticks = []
+    GLib.timeout_add(20, lambda: ticks.append(1) or win._applying)
+    win._on_apply()
+    assert spin(lambda: not win._applying, timeout=10)
+    assert len(ticks) >= 10  # the main loop kept running during the 1 s wait
+    assert [m for m, _ in win.pam.display.sent] == [0, 1]
+    assert [s[0] for s in shown] == ["error"]
+    assert "Partly Applied" in shown[0][1] and "HDMI 9" in shown[0][2]
+
+
+def test_history_problem_is_shown_in_the_banner(win, tmp_path):
+    win.pam.store.known_path.write_text("{not json")
+    win.reload(select=win.current)
+    assert win.banner.get_revealed()
+    assert "history not updated" in win.banner.get_title()
+    assert win.content_stack.get_visible_child_name() == "profile"  # still usable
