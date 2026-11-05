@@ -2,9 +2,10 @@
 
 The app was called PAM when these designs were made; it was renamed CEB on 2026-11-05. The mockup
 files in `mockup-round1/` (`index.html`, `pam.js`, `picked-A.jpg`) are kept as they were shown, so they
-still say PAM.
+still say PAM; only the tag that loaded a feedback script from outside this repository was removed
+from `index.html`.
 
-Kevin picked **option A, the Settings-style sidebar**, on 2026-11-05 15:50 ET (aqua 153e308b938f), from
+The owner picked **option A, the Settings-style sidebar**, on 2026-11-05 15:50 ET, from
 mockup round 1 (`mockup-round1/index.html`, the first window on the page; screenshot `picked-A.jpg`).
 
 Option A: profile list on the left (name + shortcut); on the right the arrangement canvas (drag,
@@ -31,3 +32,5 @@ Apply. Options B and C on the same page were not picked and are not a reference.
 - **Main menu > Remembered Devices…** (a dialog, not in the mockup) to forget remembered screens and
   audio devices that are not connected. Kept out of the main page so it stays as picked.
 - **Demo shortcuts** are Super+F2..F4 (the mockup showed Super+F1..F3; Super+F1 is GNOME's Help).
+- **Main menu > Remember Screens in the Background** (a check item, not in the mockup): runs `ceb watch`
+  now and at every login, so screens are remembered also while the window is closed.

@@ -80,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
 
     sub.add_parser("watch", help="keep running and remember every screen and audio device that is "
-                                 "connected (what the window's 'Remember screens in the background' starts)")
+                                 "connected (what the window's 'Remember Screens in the Background' runs)")
     p = sub.add_parser("install-desktop",
                        help="add CEB to the applications menu (~/.local/share: .desktop file and icon)")
     p.add_argument("--uninstall", action="store_true", help="remove them again")

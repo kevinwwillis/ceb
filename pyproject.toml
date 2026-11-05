@@ -10,6 +10,18 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [{ name = "Kevin Willis" }]
+keywords = ["gnome", "monitor", "display", "screen layout", "profiles", "audio", "pipewire", "mutter"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: GTK",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Desktop Environment :: Gnome",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: System :: Hardware",
+]
 dependencies = [
     # PulseAudio client API (libpulse via ctypes); talks to PipeWire through pipewire-pulse.
     "pulsectl>=24.0",
@@ -19,7 +31,13 @@ dependencies = [
 # It is not a pip dependency because pip would try to build it from source against the system's
 # GLib/GObject-Introspection headers. The `gi` extra installs it from PyPI for those who want that.
 # The window (ceb-gui) also needs GTK 4 and libadwaita >= 1.8 (Adw.ShortcutLabel) with their
-# introspection data; ceb-gui checks the version at start. The `ceb` command does not need them.
+# introspection data; ceb-gui checks the version at start. The `ceb` command does not need GTK or
+# libadwaita, but it does need PyGObject (Gio, for GNOME's D-Bus API).
+
+[project.urls]
+Homepage = "https://github.com/kevinwwillis/ceb"
+Source = "https://github.com/kevinwwillis/ceb"
+Issues = "https://github.com/kevinwwillis/ceb/issues"
 
 [project.optional-dependencies]
 gi = ["PyGObject>=3.42"]
