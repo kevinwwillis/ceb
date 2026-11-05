@@ -22,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Apply only asks GNOME to verify the layout; nothing is changed")
     ap.add_argument("--demo", action="store_true",
                     help="example screens and audio, throwaway store, in-memory shortcuts; touches nothing real")
+    ap.add_argument("--size", help=argparse.SUPPRESS)  # WIDTHxHEIGHT, for screenshots
     ap.add_argument("--config-dir", help="where profiles.json and known.json live (default $XDG_CONFIG_HOME/pam)")
     return ap
 
@@ -61,6 +62,9 @@ def main(argv=None) -> int:
         if win is None:
             _add_icon_path(Gtk)
             win = PamWindow(application, pam, shortcuts, dry_run=opts.dry_run, demo=opts.demo)
+            if opts.size:
+                w, h = (int(v) for v in opts.size.lower().split("x"))
+                win.set_default_size(w, h)
         win.present()
 
     app.connect("activate", activate)

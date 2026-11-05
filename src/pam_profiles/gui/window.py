@@ -32,8 +32,8 @@ CSS = """
 .pam-sidebar-key { font-family: monospace; font-size: 0.85em; }
 .pam-chip { padding: 8px 12px; border-radius: 10px; }
 .pam-dot { min-width: 9px; min-height: 9px; border-radius: 99px; }
-.pam-dot.connected { background: @success_color; }
-.pam-dot.remembered { background: alpha(@window_fg_color, 0.45); }
+.pam-dot.connected { background-color: var(--success-color); }
+.pam-dot.remembered { background-color: #777777; }
 .pam-canvas-frame { border-radius: 12px; }
 """
 
@@ -145,14 +145,30 @@ class PamWindow(Adw.ApplicationWindow):
         main.append(self.other_group)
 
         self.selected_group = Adw.PreferencesGroup(title="Selected screen")
-        self.selected_row = Adw.ActionRow()
-        self.primary_button = Gtk.Button(valign=Gtk.Align.CENTER)
+        # A row like AdwActionRow, whose buttons move under the name when the window is narrow.
+        self.selected_layout = Gtk.Box(spacing=12, margin_top=8, margin_bottom=8, margin_start=12, margin_end=12)
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, valign=Gtk.Align.CENTER, spacing=2)
+        self.selected_title = Gtk.Label(xalign=0, ellipsize=3)
+        self.selected_detail = Gtk.Label(xalign=0, wrap=True)
+        self.selected_detail.add_css_class("dim-label")
+        self.selected_detail.add_css_class("caption")
+        labels.append(self.selected_title)
+        labels.append(self.selected_detail)
+        buttons = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER)
+        self.primary_button = Gtk.Button()
         self.primary_button.connect("clicked", self._on_make_primary)
-        off = Gtk.Button(label="Turn off in profile", valign=Gtk.Align.CENTER)
+        off = Gtk.Button(label="Turn off in profile")
         off.connect("clicked", self._on_turn_off)
-        self.selected_row.add_suffix(self.primary_button)
-        self.selected_row.add_suffix(off)
-        self.selected_group.add(self.selected_row)
+        buttons.append(self.primary_button)
+        buttons.append(off)
+        self.selected_layout.append(labels)
+        self.selected_layout.append(buttons)
+        selected_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        selected_list.add_css_class("boxed-list")
+        row = Gtk.ListBoxRow(activatable=False, child=self.selected_layout)
+        row.set_size_request(-1, 50)
+        selected_list.append(row)
+        self.selected_group.add(selected_list)
         main.append(self.selected_group)
 
         self.audio_group = Adw.PreferencesGroup(title="Audio for this profile")
@@ -196,6 +212,7 @@ class PamWindow(Adw.ApplicationWindow):
         bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 640sp"))
         bp.add_setter(self.split, "collapsed", True)
         bp.add_setter(self.sidebar_button, "visible", True)
+        bp.add_setter(self.selected_layout, "orientation", Gtk.Orientation.VERTICAL)
         self.add_breakpoint(bp)
 
     def _install_actions(self) -> None:
@@ -362,7 +379,10 @@ class PamWindow(Adw.ApplicationWindow):
             dot.add_css_class("connected" if lab.connected else "remembered")
             text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             text.append(Gtk.Label(label=lab.title, xalign=0))
-            state = Gtk.Label(label="connected" if lab.connected else "remembered · not connected", xalign=0)
+            words = "connected" if lab.connected else "remembered · not connected"
+            if "twin" in lab.detail:  # two chips with the same name: say which twin each is
+                words += " · " + next(part for part in lab.detail.split(" · ") if "twin" in part)
+            state = Gtk.Label(label=words, xalign=0)
             state.add_css_class("dim-label")
             state.add_css_class("caption")
             text.append(state)
@@ -383,8 +403,8 @@ class PamWindow(Adw.ApplicationWindow):
             return
         lab = editor.label(sid, self.known, self.display_state)
         detail = lab.detail if lab.connected else f"{lab.detail} · not connected"
-        self.selected_row.set_title(lab.title)
-        self.selected_row.set_subtitle(detail)
+        self.selected_title.set_label(lab.title)
+        self.selected_detail.set_label(detail)
         is_primary = found[0].primary
         self.primary_button.set_label("★ Primary" if is_primary else "Make primary")
         self.primary_button.set_sensitive(not is_primary)

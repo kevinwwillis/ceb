@@ -87,18 +87,32 @@ def settle(rects: list[Rect], index: int, fallback: Rect) -> tuple[list[Rect], b
         return rects, True
     moved = rects[index]
     others = [r for i, r in enumerate(rects) if i != index]
-    best: tuple[float, Rect] | None = None
+    good: tuple[float, Rect] | None = None   # shares a real stretch of edge with a neighbour
+    thin: tuple[float, Rect] | None = None   # touches by a sliver only (valid, but looks wrong)
     for o in others:
         for cand in _touching_positions(moved, o):
             trial = rects[:index] + [cand] + rects[index + 1:]
             if not is_valid(trial):
                 continue
             dist = (cand.x - moved.x) ** 2 + (cand.y - moved.y) ** 2
-            if best is None or dist < best[0]:
-                best = (dist, cand)
+            if max(shared_edge(cand, n) for n in others) >= min(cand.w, cand.h) / 4:
+                if good is None or dist < good[0]:
+                    good = (dist, cand)
+            elif thin is None or dist < thin[0]:
+                thin = (dist, cand)
+    best = good or thin
     if best is not None:
         return rects[:index] + [best[1]] + rects[index + 1:], False
     return rects[:index] + [fallback] + rects[index + 1:], False
+
+
+def shared_edge(a: Rect, b: Rect) -> int:
+    """Length of the edge two adjacent rectangles share (0 when they are not adjacent)."""
+    if not adjacent(a, b):
+        return 0
+    if a.x == b.x2 or a.x2 == b.x:
+        return min(a.y2, b.y2) - max(a.y, b.y)
+    return min(a.x2, b.x2) - max(a.x, b.x)
 
 
 def _touching_positions(r: Rect, o: Rect) -> list[Rect]:
