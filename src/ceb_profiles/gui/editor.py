@@ -1,6 +1,6 @@
 """Editing a profile's screen layout, and the words shown for each screen. Pure Python (no GTK).
 
-The GUI edits a `Profile` in place with these functions and then stores it with Pam.put_profile.
+The GUI edits a `Profile` in place with these functions and then stores it with Ceb.put_profile.
 A profile's layout is a list of logical monitors; each usually holds one screen (more than one
 means the screens mirror each other). The canvas draws one box per logical monitor.
 """

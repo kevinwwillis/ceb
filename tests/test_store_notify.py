@@ -1,17 +1,17 @@
 import pytest
 
 from conftest import desk
-from pam_profiles import notify
-from pam_profiles.store import Store, StoreError
+from ceb_profiles import notify
+from ceb_profiles.store import Store, StoreError
 
 
-def test_corrupt_profiles_file_is_reported_and_kept(make_pam, tmp_path):
-    pam = make_pam(desk(1))
-    pam.store.dir.mkdir(parents=True)
-    pam.store.profiles_path.write_text("{not json")
+def test_corrupt_profiles_file_is_reported_and_kept(make_ceb, tmp_path):
+    ceb = make_ceb(desk(1))
+    ceb.store.dir.mkdir(parents=True)
+    ceb.store.profiles_path.write_text("{not json")
     with pytest.raises(StoreError):
-        pam.save_current("desk")
-    assert pam.store.profiles_path.read_text() == "{not json"
+        ceb.save_current("desk")
+    assert ceb.store.profiles_path.read_text() == "{not json"
 
 
 def test_newer_schema_is_not_overwritten(tmp_path):
@@ -21,16 +21,16 @@ def test_newer_schema_is_not_overwritten(tmp_path):
         store.load_profiles()
 
 
-def test_profile_roundtrip(make_pam):
-    pam = make_pam(desk(1))
-    saved = pam.save_current("desk")
-    assert pam.profile("desk").to_json() == saved.to_json()
+def test_profile_roundtrip(make_ceb):
+    ceb = make_ceb(desk(1))
+    saved = ceb.save_current("desk")
+    assert ceb.profile("desk").to_json() == saved.to_json()
 
 
-def test_no_temp_files_left(make_pam):
-    pam = make_pam(desk(1))
-    pam.save_current("desk")
-    assert sorted(p.name for p in pam.store.dir.iterdir()) == [".lock", "known.json", "profiles.json"]
+def test_no_temp_files_left(make_ceb):
+    ceb = make_ceb(desk(1))
+    ceb.save_current("desk")
+    assert sorted(p.name for p in ceb.store.dir.iterdir()) == [".lock", "known.json", "profiles.json"]
 
 
 def test_notify_falls_back_and_never_raises(capsys):
@@ -46,7 +46,7 @@ def test_notify_falls_back_and_never_raises(capsys):
     assert notify.notify("t", "b", senders=(broken, works)) is True
     assert calls == ["dbus", "notify-send"]
     assert notify.notify("t", "b", senders=(broken,)) is False
-    assert "pam: t: b" in capsys.readouterr().err
+    assert "ceb: t: b" in capsys.readouterr().err
 
 
 def test_notify_send_missing_binary(monkeypatch):
@@ -82,21 +82,21 @@ def test_wrong_types_are_reported_not_crashing(tmp_path, which, text):
 # ------------------------------------------------------------ symlinks and the lock file
 
 
-def test_symlinked_profiles_file_is_written_through(make_pam, tmp_path):
-    pam = make_pam(desk(1))
-    real = tmp_path / "dotfiles" / "pam-profiles.json"
+def test_symlinked_profiles_file_is_written_through(make_ceb, tmp_path):
+    ceb = make_ceb(desk(1))
+    real = tmp_path / "dotfiles" / "ceb-profiles.json"
     real.parent.mkdir()
     real.write_text('{"version": 1, "profiles": []}')
-    pam.store.dir.mkdir(parents=True)
-    pam.store.profiles_path.symlink_to(real)
-    pam.save_current("desk")
-    assert pam.store.profiles_path.is_symlink()
+    ceb.store.dir.mkdir(parents=True)
+    ceb.store.profiles_path.symlink_to(real)
+    ceb.save_current("desk")
+    assert ceb.store.profiles_path.is_symlink()
     assert '"desk"' in real.read_text()
-    assert [p.name for p in pam.profiles()] == ["desk"]
+    assert [p.name for p in ceb.profiles()] == ["desk"]
 
 
 def test_store_lock_never_follows_a_symlink(tmp_path):
-    store = Store(tmp_path / "pam")
+    store = Store(tmp_path / "ceb")
     store.dir.mkdir()
     victim = tmp_path / "victim.txt"
     victim.write_text("keep me")
@@ -112,7 +112,7 @@ def test_write_failure_is_a_store_error(tmp_path, monkeypatch):
 
     def full(*a, **k):
         raise OSError(28, "No space left on device")
-    monkeypatch.setattr("pam_profiles.store.tempfile.mkstemp", full)
+    monkeypatch.setattr("ceb_profiles.store.tempfile.mkstemp", full)
     with pytest.raises(StoreError, match="No space left"):
         store.save_profiles([])
 
@@ -120,31 +120,31 @@ def test_write_failure_is_a_store_error(tmp_path, monkeypatch):
 # ------------------------------------------------------------ last_seen does not force a rewrite
 
 
-def _observe_count(pam, monkeypatch):
+def _observe_count(ceb, monkeypatch):
     writes = []
-    real = pam.store.save_known
-    monkeypatch.setattr(pam.store, "save_known", lambda known: (writes.append(1), real(known)))
+    real = ceb.store.save_known
+    monkeypatch.setattr(ceb.store, "save_known", lambda known: (writes.append(1), real(known)))
     return writes
 
 
-def test_seeing_the_same_screens_again_does_not_rewrite_known(make_pam, monkeypatch):
-    from pam_profiles import store as store_mod
+def test_seeing_the_same_screens_again_does_not_rewrite_known(make_ceb, monkeypatch):
+    from ceb_profiles import store as store_mod
     minutes = iter(range(10, 60))
     monkeypatch.setattr(store_mod, "now_iso", lambda: f"2026-11-05T10:{next(minutes)}:00-05:00")
-    pam = make_pam(desk(1))
-    writes = _observe_count(pam, monkeypatch)
-    pam.current()
+    ceb = make_ceb(desk(1))
+    writes = _observe_count(ceb, monkeypatch)
+    ceb.current()
     assert len(writes) == 1
-    pam.current()
-    pam.current()
+    ceb.current()
+    ceb.current()
     assert len(writes) == 1
 
 
-def test_old_last_seen_is_refreshed(make_pam, monkeypatch):
-    from pam_profiles import store as store_mod
-    pam = make_pam(desk(1))
-    state = pam.display.get_state()
-    audio = pam.audio.snapshot()
+def test_old_last_seen_is_refreshed(make_ceb, monkeypatch):
+    from ceb_profiles import store as store_mod
+    ceb = make_ceb(desk(1))
+    state = ceb.display.get_state()
+    audio = ceb.audio.snapshot()
     known = store_mod.Known()
     known.observe_display(state, when="2026-11-05T10:00:00-05:00")
     known.observe_audio(audio, when="2026-11-05T10:00:00-05:00")

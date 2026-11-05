@@ -8,7 +8,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
-APP_NAME = "PAM"
+APP_NAME = "CEB"
 URGENCY_NORMAL = 1
 URGENCY_CRITICAL = 2
 
@@ -41,7 +41,7 @@ def _notify_send(title: str, body: str, urgency: int) -> bool:
 def notify(title: str, body: str, *, critical: bool = True, senders=None) -> bool:
     """Show a desktop notification; returns True if one of the senders accepted it."""
     urgency = URGENCY_CRITICAL if critical else URGENCY_NORMAL
-    print(f"pam: {title}: {body}", file=sys.stderr)
+    print(f"ceb: {title}: {body}", file=sys.stderr)
     for send in senders if senders is not None else (_dbus_notify, _notify_send):
         try:
             if send(title, body, urgency):

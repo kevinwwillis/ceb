@@ -40,7 +40,7 @@ class AudioBackend(Protocol):
 class PulseAudioBackend:
     """The real backend (pulsectl). Connects for each call; profile switches are rare."""
 
-    CLIENT_NAME = "pam"
+    CLIENT_NAME = "ceb"
 
     def _connect(self):
         try:

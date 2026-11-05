@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]  # 77: `license` as an SPDX string (PEP 639)
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pam-profiles"
+name = "ceb-profiles"
 version = "0.1.0"
 description = "Display and audio profiles for GNOME: screens on/off, positions, primary screen, default audio output and input."
 readme = "README.md"
@@ -18,22 +18,22 @@ dependencies = [
 # requirement, as for other GNOME apps: the distribution's python3-gi, or the GNOME Flatpak runtime.
 # It is not a pip dependency because pip would try to build it from source against the system's
 # GLib/GObject-Introspection headers. The `gi` extra installs it from PyPI for those who want that.
-# The window (pam-gui) also needs GTK 4 and libadwaita >= 1.8 (Adw.ShortcutLabel) with their
-# introspection data; pam-gui checks the version at start. The `pam` command does not need them.
+# The window (ceb-gui) also needs GTK 4 and libadwaita >= 1.8 (Adw.ShortcutLabel) with their
+# introspection data; ceb-gui checks the version at start. The `ceb` command does not need them.
 
 [project.optional-dependencies]
 gi = ["PyGObject>=3.42"]
 dev = ["pytest>=7"]
 
 [project.scripts]
-pam = "pam_profiles.cli:main"
-pam-gui = "pam_profiles.gui:main"
+ceb = "ceb_profiles.cli:main"
+ceb-gui = "ceb_profiles.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"pam_profiles.gui" = ["data/*.desktop", "data/icons/hicolor/scalable/apps/*.svg"]
+"ceb_profiles.gui" = ["data/*.desktop", "data/icons/hicolor/scalable/apps/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

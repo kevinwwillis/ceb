@@ -130,7 +130,7 @@ class LogicalMonitorState:
 
 @dataclass
 class DisplayState:
-    """Everything GetCurrentState says, in PAM's terms."""
+    """Everything GetCurrentState says, in CEB's terms."""
 
     serial: int
     monitors: list[ConnectedMonitor]

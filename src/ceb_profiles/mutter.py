@@ -7,7 +7,7 @@ Apply methods (the `method` argument of ApplyMonitorsConfig):
   0 = verify only: Mutter checks the layout and changes nothing;
   1 = temporary: applied at once, no "Keep changes / Revert" prompt, not written to monitors.xml;
   2 = persistent: GNOME shows the "Keep changes / Revert" prompt and stores it in monitors.xml.
-PAM only ever uses 0 and 1. The layout stays until GNOME reconfigures the monitors (re-plugging,
+CEB only ever uses 0 and 1. The layout stays until GNOME reconfigures the monitors (re-plugging,
 reboot); then GNOME falls back to its own stored layout and the profile has to be applied again.
 """
 from __future__ import annotations
@@ -188,7 +188,7 @@ class MutterDisplayConfig:
     def apply(self, serial: int, method: int, logical_monitors: list[ApplyLogicalMonitor],
               properties: dict) -> None:
         if method not in _ALLOWED_METHODS:
-            raise ValueError(f"PAM never applies with method {method}; only 0 (verify) and 1 (temporary)")
+            raise ValueError(f"CEB never applies with method {method}; only 0 (verify) and 1 (temporary)")
         from gi.repository import GLib
         self._proxy_call("ApplyMonitorsConfig", build_apply_variant(serial, method, logical_monitors,
                                                                     properties, GLib))

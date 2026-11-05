@@ -1,8 +1,8 @@
 """The GUI's pure logic: snapping, settling a dropped screen, editing a profile, screen names."""
 from conftest import LENOVO, PROJECTOR, ROG, desk, mon, reply
-from pam_profiles.gui import editor
-from pam_profiles.gui.geometry import Rect, adjacent, close_gap, is_valid, nudge, settle, snap
-from pam_profiles.model import Identity, ModeSpec
+from ceb_profiles.gui import editor
+from ceb_profiles.gui.geometry import Rect, adjacent, close_gap, is_valid, nudge, settle, snap
+from ceb_profiles.model import Identity, ModeSpec
 
 HD = (1920, 1080)
 
@@ -94,31 +94,31 @@ def test_close_gap_after_taking_out_the_middle_screen():
 # ------------------------------------------------------------ editing a profile
 
 
-def desk_profile(make_pam):
-    pam = make_pam(desk(1))
-    pam.save_current("desk")
-    return pam, pam.profile("desk")
+def desk_profile(make_ceb):
+    ceb = make_ceb(desk(1))
+    ceb.save_current("desk")
+    return ceb, ceb.profile("desk")
 
 
-def test_remove_middle_screen_closes_the_gap_and_moves_primary(make_pam):
-    pam, p = desk_profile(make_pam)
+def test_remove_middle_screen_closes_the_gap_and_moves_primary(make_ceb):
+    ceb, p = desk_profile(make_ceb)
     rog = editor.primary_screen(p)
     editor.remove(p, rog)
     assert len(p.displays.logical_monitors) == 2
     assert [(lm.x, lm.y) for lm in p.displays.logical_monitors] == [(0, 0), (1920, 0)]
     assert sum(lm.primary for lm in p.displays.logical_monitors) == 1
-    pam.put_profile(p)
-    pam.display.set(desk(2))
-    assert pam.apply("desk", dry_run=True).ok
+    ceb.put_profile(p)
+    ceb.display.set(desk(2))
+    assert ceb.apply("desk", dry_run=True).ok
 
 
-def test_add_goes_right_of_the_rightmost_and_first_is_primary(make_pam):
-    pam, p = desk_profile(make_pam)
+def test_add_goes_right_of_the_rightmost_and_first_is_primary(make_ceb):
+    ceb, p = desk_profile(make_ceb)
     proj = mon("DP-1", PROJECTOR)
-    pam.display.set(reply([*desk(1)[1], proj]))
-    state = pam.display.get_state()
+    ceb.display.set(reply([*desk(1)[1], proj]))
+    state = ceb.display.get_state()
     sid = state.by_connector("DP-1").screen_id
-    mode, scale = editor.mode_for(sid, state, pam.known())
+    mode, scale = editor.mode_for(sid, state, ceb.known())
     editor.add(p, sid, mode, scale, 1)
     lm = p.displays.logical_monitors[-1]
     assert (lm.x, lm.y, lm.primary) == (5760, 0, False)
@@ -129,25 +129,25 @@ def test_add_goes_right_of_the_rightmost_and_first_is_primary(make_pam):
     assert (empty.displays.logical_monitors[0].x, empty.displays.logical_monitors[0].y) == (0, 0)
 
 
-def test_mode_for_a_remembered_screen_comes_from_the_history(make_pam):
-    pam = make_pam(reply([mon("HDMI-1", ROG), mon("DP-1", PROJECTOR)]))
-    pam.current()
-    pam.display.set(reply([mon("HDMI-1", ROG)]))
-    state = pam.display.get_state()
-    proj = next(k.screen for k in pam.known().screens if k.screen.identity.vendor == "STK")
-    assert editor.mode_for(proj, state, pam.known()) == (ModeSpec(1920, 1080, 60.0), 1.0)
+def test_mode_for_a_remembered_screen_comes_from_the_history(make_ceb):
+    ceb = make_ceb(reply([mon("HDMI-1", ROG), mon("DP-1", PROJECTOR)]))
+    ceb.current()
+    ceb.display.set(reply([mon("HDMI-1", ROG)]))
+    state = ceb.display.get_state()
+    proj = next(k.screen for k in ceb.known().screens if k.screen.identity.vendor == "STK")
+    assert editor.mode_for(proj, state, ceb.known()) == (ModeSpec(1920, 1080, 60.0), 1.0)
 
 
-def test_move_shifts_the_layout_to_start_at_zero(make_pam):
-    pam, p = desk_profile(make_pam)
+def test_move_shifts_the_layout_to_start_at_zero(make_ceb):
+    ceb, p = desk_profile(make_ceb)
     left = p.displays.logical_monitors[0].screens[0].screen
     editor.move(p, left, -1920, 300)
     xs = sorted((lm.x, lm.y) for lm in p.displays.logical_monitors)
     assert min(x for x, _ in xs) == 0 and min(y for _, y in xs) == 0
 
 
-def test_set_primary(make_pam):
-    pam, p = desk_profile(make_pam)
+def test_set_primary(make_ceb):
+    ceb, p = desk_profile(make_ceb)
     left = p.displays.logical_monitors[0].screens[0].screen
     editor.set_primary(p, left)
     assert editor.primary_screen(p) == left
@@ -155,7 +155,7 @@ def test_set_primary(make_pam):
 
 
 def test_scaled_and_rotated_sizes():
-    from pam_profiles.model import ProfileLogicalMonitor, ProfileScreen, ScreenId
+    from ceb_profiles.model import ProfileLogicalMonitor, ProfileScreen, ScreenId
     sid = ScreenId(Identity.of("A", "B", "C"))
     lm = ProfileLogicalMonitor(0, 0, 2.0, 1, True, [ProfileScreen(sid, ModeSpec(3840, 2160, 60.0))])
     assert editor.lm_rect(lm, 1) == Rect(0, 0, 1080, 1920)   # logical: halved, turned
@@ -172,27 +172,27 @@ def test_screen_titles():
     assert editor.screen_size('Lenovo Group Limited 23"') == '23"'
 
 
-def test_twin_labels_say_which_port(make_pam):
-    pam = make_pam(desk(1))
-    state, _, _ = pam.current()
+def test_twin_labels_say_which_port(make_ceb):
+    ceb = make_ceb(desk(1))
+    state, _, _ = ceb.current()
     lower = state.by_connector("HDMI-1").screen_id
     higher = state.by_connector("HDMI-2").screen_id
-    assert "twin 1 of 2 (lower port)" in editor.label(lower, pam.known(), state).detail
-    assert "twin 2 of 2 (higher port)" in editor.label(higher, pam.known(), state).detail
+    assert "twin 1 of 2 (lower port)" in editor.label(lower, ceb.known(), state).detail
+    assert "twin 2 of 2 (higher port)" in editor.label(higher, ceb.known(), state).detail
     rog = state.by_connector("HDMI-3").screen_id
-    assert editor.label(rog, pam.known(), state).detail == '24" · serial L8LMQS075392'
-    assert editor.label(rog, pam.known(), None).connected is False
+    assert editor.label(rog, ceb.known(), state).detail == '24" · serial L8LMQS075392'
+    assert editor.label(rog, ceb.known(), None).connected is False
 
 
 def test_version_check_names_the_libadwaita_needed():
-    from pam_profiles.gui import version_problem
+    from ceb_profiles.gui import version_problem
     assert version_problem((1, 8, 0)) is None and version_problem((1, 9, 1)) is None
     assert "1.8" in version_problem((1, 7, 4)) and "1.7.4" in version_problem((1, 7, 4))
     assert "gir1.2-adw-1" in version_problem(None)
 
 
-def test_pam_gui_exits_with_a_message_on_old_libadwaita(monkeypatch, capsys):
-    import pam_profiles.gui as gui
+def test_ceb_gui_exits_with_a_message_on_old_libadwaita(monkeypatch, capsys):
+    import ceb_profiles.gui as gui
     monkeypatch.setattr(gui, "_adw_version", lambda: (1, 7, 0))
     assert gui.main([]) == 1  # before anything real is opened
     assert "libadwaita 1.8" in capsys.readouterr().err

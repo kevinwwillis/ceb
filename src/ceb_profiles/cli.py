@@ -1,6 +1,6 @@
-"""Command-line interface: `pam list`, `pam show`, `pam save-current`, `pam apply`, `pam delete`.
+"""Command-line interface: `ceb list`, `ceb show`, `ceb save-current`, `ceb apply`, `ceb delete`.
 
-`pam apply <name>` is what keyboard shortcuts run. Every failure of `apply` (and any unexpected error)
+`ceb apply <name>` is what keyboard shortcuts run. Every failure of `apply` (and any unexpected error)
 is shown as a desktop notification as well as printed, because a shortcut has no terminal.
 
 Exit codes: 0 done; 1 failed or refused (nothing changed, or an error part-way); 2 wrong command
@@ -19,7 +19,7 @@ import traceback
 
 from . import __version__
 from .audio import AudioError
-from .core import ApplyResult, Pam, PamError
+from .core import ApplyResult, Ceb, CebError
 from .model import Profile
 from .mutter import DisplayError
 from .notify import notify as desktop_notify
@@ -44,10 +44,10 @@ class _Parser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = _Parser(prog="pam", description="Display and audio profiles for GNOME.")
-    ap.add_argument("--version", action="version", version=f"pam {__version__}")
+    ap = _Parser(prog="ceb", description="Display and audio profiles for GNOME.")
+    ap.add_argument("--version", action="version", version=f"ceb {__version__}")
     ap.add_argument("--config-dir", metavar="DIR",
-                    help="where profiles and history are kept (default $XDG_CONFIG_HOME/pam)")
+                    help="where profiles and history are kept (default $XDG_CONFIG_HOME/ceb)")
     sub = ap.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("list", help="list profiles, every screen ever seen, and audio devices")
@@ -70,16 +70,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="apply what is present and skip missing screens or audio devices (reported)")
     p.add_argument("--no-notify", action="store_true", help="no desktop notification on failure")
 
-    sub.add_parser("gui", help="open the PAM window (same as pam-gui; pam gui --help for its options)",
+    sub.add_parser("gui", help="open the CEB window (same as ceb-gui; ceb gui --help for its options)",
                    add_help=False)
     p = sub.add_parser("delete", help="delete a profile")
     p.add_argument("name")
     return ap
 
 
-def main(argv=None, *, pam: Pam | None = None, notifier=desktop_notify, on_terminal=None) -> int:
+def main(argv=None, *, ceb: Ceb | None = None, notifier=desktop_notify, on_terminal=None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if args[:1] == ["gui"]:  # `pam gui [--dry-run|--demo|...]` is `pam-gui`
+    if args[:1] == ["gui"]:  # `ceb gui [--dry-run|--demo|...]` is `ceb-gui`
         from .gui import main as gui_main
         return gui_main(args[1:])
     try:
@@ -89,28 +89,28 @@ def main(argv=None, *, pam: Pam | None = None, notifier=desktop_notify, on_termi
     notify_failures = opts.command == "apply" and not opts.no_notify and not opts.dry_run
     sink = notifier if notify_failures else None
     try:
-        pam = pam or Pam(store=Store(opts.config_dir))
+        ceb = ceb or Ceb(store=Store(opts.config_dir))
         handler = {"list": cmd_list, "show": cmd_show, "save-current": cmd_save,
                    "apply": cmd_apply, "delete": cmd_delete}[opts.command]
-        return handler(pam, opts, sink)
-    except (PamError, StoreError) as e:
-        return _fail(f"pam {opts.command} failed", str(e), sink)
+        return handler(ceb, opts, sink)
+    except (CebError, StoreError) as e:
+        return _fail(f"ceb {opts.command} failed", str(e), sink)
     except DisplayError as e:
-        return _fail(f"pam {opts.command} failed", f"could not read the screens: {e}", sink)
+        return _fail(f"ceb {opts.command} failed", f"could not read the screens: {e}", sink)
     except AudioError as e:
-        return _fail(f"pam {opts.command} failed", str(e), sink)
+        return _fail(f"ceb {opts.command} failed", str(e), sink)
     except Exception as e:  # anything unexpected: still tell the user, with the type
         traceback.print_exc()
-        return _fail(f"pam {opts.command} failed", f"unexpected error: {type(e).__name__}: {e}", sink)
+        return _fail(f"ceb {opts.command} failed", f"unexpected error: {type(e).__name__}: {e}", sink)
 
 
 def _usage_error(e: UsageError, args: list[str], notifier, on_terminal) -> int:
     e.parser.print_usage(sys.stderr)
-    # No "pam:" in the title: stderr adds it ("pam: Wrong command: ..."); the notification shows "PAM".
-    title, body = "Wrong command", f"{e} (command: pam {' '.join(args)})".rstrip()
+    # No "ceb:" in the title: stderr adds it ("ceb: Wrong command: ..."); the notification shows "CEB".
+    title, body = "Wrong command", f"{e} (command: ceb {' '.join(args)})".rstrip()
     terminal = sys.stderr.isatty() if on_terminal is None else on_terminal
     if terminal or "--no-notify" in args or "--dry-run" in args:
-        print(f"pam: {title}: {body}", file=sys.stderr)
+        print(f"ceb: {title}: {body}", file=sys.stderr)
     else:
         notifier(title, body)  # also prints to stderr
     return EXIT_USAGE
@@ -120,26 +120,26 @@ def _fail(title: str, body: str, notifier) -> int:
     if notifier:
         notifier(title, body)  # also prints to stderr
     else:
-        print(f"pam: {title}: {body}", file=sys.stderr)
+        print(f"ceb: {title}: {body}", file=sys.stderr)
     return EXIT_FAILED
 
 
 # ---------------------------------------------------------------- list / show
 
 
-def cmd_list(pam: Pam, opts, _notifier) -> int:
+def cmd_list(ceb: Ceb, opts, _notifier) -> int:
     """Lists everything it can. An unreadable profiles.json or known.json is reported (exit 1) but
     does not hide the rest; without a readable history, the connected screens are still shown."""
     file_errors = []
     try:
-        profiles = pam.profiles()
+        profiles = ceb.profiles()
     except StoreError as e:
         profiles, file_errors = [], [str(e)]
-    display_state, audio_state, audio_errors = pam.current()
-    if pam.last_history_error:
-        file_errors.append(pam.last_history_error)
+    display_state, audio_state, audio_errors = ceb.current()
+    if ceb.last_history_error:
+        file_errors.append(ceb.last_history_error)
     try:
-        known = pam.known()
+        known = ceb.known()
     except StoreError as e:
         if str(e) not in " ".join(file_errors):
             file_errors.append(str(e))
@@ -160,16 +160,16 @@ def cmd_list(pam: Pam, opts, _notifier) -> int:
                 "default_output": audio_state.default_output, "default_input": audio_state.default_input},
             "errors": audio_errors + file_errors}, indent=2))
         for e in file_errors:
-            print(f"pam: {e}", file=sys.stderr)
+            print(f"ceb: {e}", file=sys.stderr)
         return EXIT_FAILED if file_errors else EXIT_OK
 
     print("Profiles:")
     if not profiles:
-        print("  (none; save one with: pam save-current <name>)")
+        print("  (none; save one with: ceb save-current <name>)")
     for p in profiles:
         print(f"  {p.name}: {_profile_summary(p)}")
 
-    print("\nScreens (every screen PAM has seen):")
+    print("\nScreens (every screen CEB has seen):")
     for ks in sorted(known.screens, key=lambda s: (s.screen not in connected, s.display_name, s.screen.twin)):
         cm = connected.get(ks.screen)
         twins = len(known.twins_of(ks.screen.identity))
@@ -184,14 +184,14 @@ def cmd_list(pam: Pam, opts, _notifier) -> int:
     for title, entries, present, default in (
             ("Audio outputs", known.outputs, present_out, audio_state.default_output if audio_state else None),
             ("Audio inputs", known.inputs, present_in, audio_state.default_input if audio_state else None)):
-        print(f"\n{title} (every device PAM has seen):")
+        print(f"\n{title} (every device CEB has seen):")
         for a in entries:
             mark = "default" if a.name == default else ("present" if a.name in present else "absent ")
             print(f"  {mark}  {a.description or a.name}  [{a.name}]")
     for e in audio_errors:
-        print(f"\npam: audio: {e}", file=sys.stderr)
+        print(f"\nceb: audio: {e}", file=sys.stderr)
     for e in file_errors:
-        print(f"\npam: {e}", file=sys.stderr)
+        print(f"\nceb: {e}", file=sys.stderr)
     return EXIT_FAILED if file_errors else EXIT_OK
 
 
@@ -209,17 +209,17 @@ def _profile_summary(p: Profile) -> str:
     return ", ".join(parts)
 
 
-def cmd_show(pam: Pam, opts, _notifier) -> int:
-    p = pam.profile(opts.name)
+def cmd_show(ceb: Ceb, opts, _notifier) -> int:
+    p = ceb.profile(opts.name)
     if opts.json:
         print(json.dumps(p.to_json(), indent=2))
         return EXIT_OK
     print(f"Profile {p.name}")
     if p.displays:
         try:
-            known = pam.known()
+            known = ceb.known()
         except StoreError as e:
-            print(f"pam: {e}", file=sys.stderr)
+            print(f"ceb: {e}", file=sys.stderr)
             known = Known()
         for lm in p.displays.logical_monitors:
             for s in lm.screens:
@@ -239,16 +239,16 @@ def cmd_show(pam: Pam, opts, _notifier) -> int:
 # ---------------------------------------------------------------- save / delete
 
 
-def cmd_save(pam: Pam, opts, _notifier) -> int:
-    p = pam.save_current(opts.name, overwrite=opts.force, include_audio=not opts.no_audio)
+def cmd_save(ceb: Ceb, opts, _notifier) -> int:
+    p = ceb.save_current(opts.name, overwrite=opts.force, include_audio=not opts.no_audio)
     print(f"saved profile {p.name}: {_profile_summary(p)}")
-    if pam.last_history_error:
-        print(f"pam: {pam.last_history_error}", file=sys.stderr)
+    if ceb.last_history_error:
+        print(f"ceb: {ceb.last_history_error}", file=sys.stderr)
     return EXIT_OK
 
 
-def cmd_delete(pam: Pam, opts, _notifier) -> int:
-    pam.delete_profile(opts.name)
+def cmd_delete(ceb: Ceb, opts, _notifier) -> int:
+    ceb.delete_profile(opts.name)
     print(f"deleted profile {opts.name}")
     return EXIT_OK
 
@@ -256,8 +256,8 @@ def cmd_delete(pam: Pam, opts, _notifier) -> int:
 # ---------------------------------------------------------------- apply
 
 
-def cmd_apply(pam: Pam, opts, notifier) -> int:
-    result = pam.apply(opts.name, dry_run=opts.dry_run, allow_missing=opts.allow_missing)
+def cmd_apply(ceb: Ceb, opts, notifier) -> int:
+    result = ceb.apply(opts.name, dry_run=opts.dry_run, allow_missing=opts.allow_missing)
     _print_result(result)
     if result.ok:
         return EXIT_OK
@@ -280,7 +280,7 @@ def cmd_apply(pam: Pam, opts, notifier) -> int:
         # Partial success is information, not an alarm: normal urgency.
         notifier(title, body, critical=code != EXIT_PARTIAL)  # also prints to stderr
     else:
-        print(f"pam: {title}: {body}", file=sys.stderr)
+        print(f"ceb: {title}: {body}", file=sys.stderr)
     return code
 
 

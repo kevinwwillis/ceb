@@ -17,17 +17,17 @@ from .store import Known, Store, StoreError, open_lock_file
 
 APPLY_LOCK_WAIT_S = 40
 # An HDMI/DisplayPort audio output can appear only once its screen is on. When a profile turns a
-# screen on and needs such a device that is not present yet, PAM applies the screens first and
+# screen on and needs such a device that is not present yet, CEB applies the screens first and
 # then waits up to this long for the device (it is never replaced by another one).
 AUDIO_APPEAR_WAIT_S = 5.0
 AUDIO_POLL_S = 0.25
 
 
-class PamError(Exception):
+class CebError(Exception):
     """A request that cannot be done (unknown profile, name taken, nothing to save...)."""
 
 
-class ProfileChanged(PamError):
+class ProfileChanged(CebError):
     """The stored profile is not the one an edit was made on (put_profile's `expected`)."""
 
 
@@ -66,7 +66,7 @@ class ApplyResult:
         return [p.message for p in self.problems] + self.errors
 
 
-class Pam:
+class Ceb:
     def __init__(self, display: DisplayBackend | None = None, audio: AudioBackend | None = None,
                  store: Store | None = None):
         self.display = display or MutterDisplayConfig()
@@ -87,7 +87,7 @@ class Pam:
     def profile(self, name: str) -> Profile:
         p = next((p for p in self.profiles() if p.name == name), None)
         if p is None:
-            raise PamError(f"no profile named {name!r}")
+            raise CebError(f"no profile named {name!r}")
         return p
 
     def known(self) -> Known:
@@ -145,14 +145,14 @@ class Pam:
             for connector in lm.connectors:
                 cm = display_state.by_connector(connector)
                 if cm is None:
-                    raise PamError(f"GNOME lists {connector} in the layout but not as a connected monitor")
+                    raise CebError(f"GNOME lists {connector} in the layout but not as a connected monitor")
                 mode = cm.current_mode()
                 if mode is None:
-                    raise PamError(f"{connector} has no current mode")
+                    raise CebError(f"{connector} has no current mode")
                 screens.append(ProfileScreen(cm.screen_id, mode.spec(), connector))
             lms.append(ProfileLogicalMonitor(lm.x, lm.y, lm.scale, lm.transform, lm.primary, screens))
         if not lms:
-            raise PamError("no screen is on; nothing to save")
+            raise CebError("no screen is on; nothing to save")
         profile = Profile(name, DisplayLayout(lms, display_state.layout_mode))
         if include_audio and audio_state is not None:
             profile.audio_output = _ref(audio_state.outputs, audio_state.default_output)
@@ -162,10 +162,10 @@ class Pam:
     def save_current(self, name: str, *, overwrite: bool = False, include_audio: bool = True) -> Profile:
         name = name.strip()
         if not name:
-            raise PamError("a profile needs a name")
+            raise CebError("a profile needs a name")
         display_state, audio_state, errors = self.current(need_audio=include_audio)
         if include_audio and errors:
-            raise PamError("; ".join(errors) + " (use --no-audio to save the screens only)")
+            raise CebError("; ".join(errors) + " (use --no-audio to save the screens only)")
         profile = self.capture(name, display_state, audio_state, include_audio)
         self.put_profile(profile, overwrite=overwrite)
         return profile
@@ -174,13 +174,13 @@ class Pam:
         """Add or replace a profile (the GUI uses this after editing positions).
 
         `expected`: the stored profile the edit was made on. If the stored profile is no longer
-        that (someone ran `pam save-current --force` or edited the file meanwhile), nothing is
+        that (someone ran `ceb save-current --force` or edited the file meanwhile), nothing is
         written and ProfileChanged is raised, so a newer version is never silently overwritten."""
         with self.store.locked():
             profiles = self.store.load_profiles()
             index = next((i for i, p in enumerate(profiles) if p.name == profile.name), None)
             if index is not None and not overwrite:
-                raise PamError(f"a profile named {profile.name!r} already exists")
+                raise CebError(f"a profile named {profile.name!r} already exists")
             if expected is not None:
                 stored = profiles[index] if index is not None else None
                 if stored is None or stored.to_json() != expected.to_json():
@@ -195,21 +195,21 @@ class Pam:
         """Rename a profile in place (it keeps its position in the list), in one write."""
         new = new.strip()
         if not new:
-            raise PamError("a profile needs a name")
+            raise CebError("a profile needs a name")
         with self.store.locked():
             profiles = self.store.load_profiles()
             index = next((i for i, p in enumerate(profiles) if p.name == old), None)
             if index is None:
-                raise PamError(f"no profile named {old!r}")
+                raise CebError(f"no profile named {old!r}")
             if new != old and any(p.name == new for p in profiles):
-                raise PamError(f"a profile named {new!r} already exists")
+                raise CebError(f"a profile named {new!r} already exists")
             p = profiles[index]
             profiles[index] = Profile(new, p.displays, p.audio_output, p.audio_input)
             self.store.save_profiles(profiles)
 
     def forget_screen(self, sid: ScreenId) -> bool:
         """Remove a screen from the history (known.json). Profiles that use it keep it. A connected
-        screen is recorded again the next time PAM reads the screens. Returns False if it was not
+        screen is recorded again the next time CEB reads the screens. Returns False if it was not
         remembered."""
         with self.store.locked():
             known = self.store.load_known()
@@ -243,7 +243,7 @@ class Pam:
             profiles = self.store.load_profiles()
             kept = [p for p in profiles if p.name != name]
             if len(kept) == len(profiles):
-                raise PamError(f"no profile named {name!r}")
+                raise CebError(f"no profile named {name!r}")
             self.store.save_profiles(kept)
 
     # ------------------------------------------------------------ applying
@@ -302,7 +302,7 @@ class Pam:
             aplan.problems = [p for p in aplan.problems if p.kind not in {f"missing_{k}" for k, _ in awaited}]
             for kind, ref in awaited:
                 result.notes.append(f"audio {kind} {ref.describe()} is not present yet; it may appear when "
-                                    f"the screens change, PAM waits up to {self.audio_appear_wait_s:g} s for it")
+                                    f"the screens change, CEB waits up to {self.audio_appear_wait_s:g} s for it")
         result.display_plan, result.audio_plan = dplan, aplan
         result.problems = (dplan.problems if dplan else []) + aplan.problems
         if dplan:
@@ -405,12 +405,12 @@ def _awaited_audio(profile: Profile, aplan: AudioPlan, dplan: DisplayPlan | None
 def _apply_lock(fallback_dir: str | os.PathLike):
     """One switch at a time (a fast double key press). Returns the held file, or False on timeout.
 
-    The lock lives in $XDG_RUNTIME_DIR (private to the user), or else in PAM's own config folder;
+    The lock lives in $XDG_RUNTIME_DIR (private to the user), or else in CEB's own config folder;
     never in a shared folder such as /tmp. It is opened without following symlinks or truncating
     (store.open_lock_file); a problem with it raises StoreError."""
     runtime = os.environ.get("XDG_RUNTIME_DIR")
     if runtime and os.path.isdir(runtime):
-        path = Path(runtime) / "pam-apply.lock"
+        path = Path(runtime) / "ceb-apply.lock"
     else:
         try:
             Path(fallback_dir).mkdir(parents=True, exist_ok=True)

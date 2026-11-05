@@ -1,4 +1,4 @@
-"""PAM's main window, built from the picked mockup (option A, "Settings-style sidebar").
+"""CEB's main window, built from the picked mockup (option A, "Settings-style sidebar").
 
 Header bar: + (new profile), the title, a menu (rename, delete, about) and Apply.
 Left: the profiles, each with its keyboard shortcut. Right, for the selected profile: the
@@ -20,7 +20,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from ..audio import AudioError  # noqa: E402
-from ..core import ApplyResult, Pam, PamError, ProfileChanged  # noqa: E402
+from ..core import ApplyResult, Ceb, CebError, ProfileChanged  # noqa: E402
 from ..model import AudioRef, Profile, ScreenId  # noqa: E402
 from ..mutter import BUS_NAME, INTERFACE, OBJECT_PATH, DisplayError  # noqa: E402
 from ..store import Known, StoreError  # noqa: E402
@@ -30,12 +30,12 @@ from .geometry import is_valid  # noqa: E402
 from .shortcuts import Shortcuts, ShortcutError  # noqa: E402
 
 CSS = """
-.pam-sidebar-key { font-family: monospace; font-size: 0.85em; }
-.pam-chip { padding: 8px 12px; border-radius: 10px; }
-.pam-dot { min-width: 9px; min-height: 9px; border-radius: 99px; }
-.pam-dot.connected { background-color: #2ec27e; }  /* the mockup's green (GNOME palette Green 4) */
-.pam-dot.remembered { background-color: #777777; }
-.pam-canvas-frame { border-radius: 12px; }
+.ceb-sidebar-key { font-family: monospace; font-size: 0.85em; }
+.ceb-chip { padding: 8px 12px; border-radius: 10px; }
+.ceb-dot { min-width: 9px; min-height: 9px; border-radius: 99px; }
+.ceb-dot.connected { background-color: #2ec27e; }  /* the mockup's green (GNOME palette Green 4) */
+.ceb-dot.remembered { background-color: #777777; }
+.ceb-canvas-frame { border-radius: 12px; }
 """
 
 
@@ -51,11 +51,11 @@ def same_accel(a: str, b: str) -> bool:
     return pa[0] and pb[0] and Gdk.keyval_to_lower(pa[1]) == Gdk.keyval_to_lower(pb[1]) and pa[2] == pb[2]
 
 
-class PamWindow(Adw.ApplicationWindow):
-    def __init__(self, app: Adw.Application, pam: Pam, shortcuts: Shortcuts, *, dry_run: bool = False,
+class CebWindow(Adw.ApplicationWindow):
+    def __init__(self, app: Adw.Application, ceb: Ceb, shortcuts: Shortcuts, *, dry_run: bool = False,
                  demo: bool = False):
-        super().__init__(application=app, title="PAM", default_width=1100, default_height=760)
-        self.pam, self.shortcuts, self.dry_run, self.demo = pam, shortcuts, dry_run, demo
+        super().__init__(application=app, title="CEB", default_width=1100, default_height=760)
+        self.ceb, self.shortcuts, self.dry_run, self.demo = ceb, shortcuts, dry_run, demo
         self.profiles: list[Profile] = []
         self.known = Known()
         self.display_state = None
@@ -91,7 +91,7 @@ class PamWindow(Adw.ApplicationWindow):
                                           sidebar_width_fraction=0.24)
         view = Adw.ToolbarView()
         header = Adw.HeaderBar()
-        self.title = Adw.WindowTitle(title="PAM", subtitle="")
+        self.title = Adw.WindowTitle(title="CEB", subtitle="")
         header.set_title_widget(self.title)
 
         self.sidebar_button = Gtk.ToggleButton(icon_name="sidebar-show-symbolic", tooltip_text="Show Profiles",
@@ -122,7 +122,7 @@ class PamWindow(Adw.ApplicationWindow):
         history.append("_Remembered Devices…", "win.remembered")
         menu.append_section(None, history)
         about = Gio.Menu()
-        about.append("_About PAM", "win.about")
+        about.append("_About CEB", "win.about")
         menu.append_section(None, about)
         header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, primary=True,
                                        tooltip_text="Main Menu"))
@@ -268,28 +268,28 @@ class PamWindow(Adw.ApplicationWindow):
         """Everything reload() reads, without touching any widget (so it can run in a thread)."""
         problems = []
         try:
-            display_state = self.pam.display.get_state()
+            display_state = self.ceb.display.get_state()
         except DisplayError as e:
             display_state = None
             problems.append(f"Could not read the screens: {e}")
         try:
-            audio_state = self.pam.audio.snapshot()
+            audio_state = self.ceb.audio.snapshot()
         except AudioError as e:
             audio_state = None
             problems.append(f"Could not read the audio devices: {e}")
         # Grows the history of every screen and audio device seen (docs/behavior.md). A history
         # that cannot be read or written is reported, and the window keeps working without it.
-        history_error = self.pam.observe_best_effort(display_state, audio_state)
+        history_error = self.ceb.observe_best_effort(display_state, audio_state)
         if history_error:
             problems.append(history_error)
         try:
-            known = self.pam.known()
+            known = self.ceb.known()
         except StoreError as e:
             known = Known()
             if not history_error:
                 problems.append(str(e))
         try:
-            profiles = self.pam.profiles()
+            profiles = self.ceb.profiles()
         except StoreError as e:
             problems.append(str(e))
             profiles = []
@@ -334,7 +334,7 @@ class PamWindow(Adw.ApplicationWindow):
     def edit(self, change, *, from_widget_signal: bool = False) -> bool:
         """Change the selected profile with `change(profile)` and store it at once. The edit is
         stored only if profiles.json still holds the profile as shown; if it was changed outside
-        this window (for example `pam save-current --force`), nothing is written and the window
+        this window (for example `ceb save-current --force`), nothing is written and the window
         shows the newer version. `from_widget_signal`: called from a widget's own signal (a combo
         row's notify::selected), so the redraw that replaces that widget's model waits until idle."""
         p = self.profile()
@@ -343,14 +343,14 @@ class PamWindow(Adw.ApplicationWindow):
         before = copy.deepcopy(p)
         change(p)
         try:
-            self.pam.put_profile(p, expected=before)
+            self.ceb.put_profile(p, expected=before)
             return True
         except ProfileChanged:
-            message = (f"“{p.name}” was changed outside PAM's window; showing the newer version. "
+            message = (f"“{p.name}” was changed outside CEB's window; showing the newer version. "
                        "Make your change again.")
             self._after(from_widget_signal, lambda: (self.reload(select=self.current), self.toast(message)))
             return False
-        except (StoreError, PamError) as e:
+        except (StoreError, CebError) as e:
             self._after(from_widget_signal, lambda: (self.error("Could Not Save the Profile", str(e)),
                                                       self.reload(select=self.current)))
             return False
@@ -366,8 +366,8 @@ class PamWindow(Adw.ApplicationWindow):
         """True when profiles.json holds the profile as this window shows it."""
         shown = next((p for p in self.profiles if p.name == name), None)
         try:
-            stored = self.pam.profile(name)
-        except (PamError, StoreError):
+            stored = self.ceb.profile(name)
+        except (CebError, StoreError):
             return False
         return shown is not None and shown.to_json() == stored.to_json()
 
@@ -385,7 +385,7 @@ class PamWindow(Adw.ApplicationWindow):
                 name = Gtk.Label(label=p.name, xalign=0, hexpand=True, ellipsize=3)
                 key = Gtk.Label(label=accel_label(self.keys.get(p.name)))
                 key.add_css_class("dim-label")
-                key.add_css_class("pam-sidebar-key")
+                key.add_css_class("ceb-sidebar-key")
                 box.append(name)
                 box.append(key)
                 row.set_child(box)
@@ -457,9 +457,9 @@ class PamWindow(Adw.ApplicationWindow):
             lab = editor.label(sid, self.known, self.display_state)
             chip = Gtk.Box(spacing=10)
             chip.add_css_class("card")
-            chip.add_css_class("pam-chip")
+            chip.add_css_class("ceb-chip")
             dot = Gtk.Box(valign=Gtk.Align.CENTER)
-            dot.add_css_class("pam-dot")
+            dot.add_css_class("ceb-dot")
             dot.add_css_class("connected" if lab.connected else "remembered")
             text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             text.append(Gtk.Label(label=lab.title, xalign=0))
@@ -616,7 +616,7 @@ class PamWindow(Adw.ApplicationWindow):
             return
         found = editor.mode_for(sid, self.display_state, self.known)
         if found is None:
-            self.error("Cannot Add the Screen", "PAM does not know any mode of this screen.")
+            self.error("Cannot Add the Screen", "CEB does not know any mode of this screen.")
             return
         mode, scale = found
         layout_mode = (p.displays.layout_mode if p.displays else None) or (
@@ -696,16 +696,16 @@ class PamWindow(Adw.ApplicationWindow):
                 return
             name = entry.get_text().strip()
             try:
-                self.pam.save_current(name)
+                self.ceb.save_current(name)
                 note = ""
-            except PamError as e:
+            except CebError as e:
                 if "--no-audio" not in str(e):  # only an audio read failure: save the screens alone
                     self.error("Could Not Create the Profile", str(e))
                     return
                 try:
-                    self.pam.save_current(name, include_audio=False)
+                    self.ceb.save_current(name, include_audio=False)
                     note = " (screens only: the audio devices could not be read)"
-                except (PamError, StoreError, DisplayError) as e2:
+                except (CebError, StoreError, DisplayError) as e2:
                     self.error("Could Not Create the Profile", str(e2))
                     return
             except (StoreError, DisplayError) as e:
@@ -743,8 +743,8 @@ class PamWindow(Adw.ApplicationWindow):
                 return
             new = entry.get_text().strip()
             try:
-                self.pam.rename_profile(old, new)  # keeps its place in the list; one write
-            except (PamError, StoreError) as e:
+                self.ceb.rename_profile(old, new)  # keeps its place in the list; one write
+            except (CebError, StoreError) as e:
                 self.error("Could Not Rename the Profile", str(e))
                 return
             try:
@@ -772,8 +772,8 @@ class PamWindow(Adw.ApplicationWindow):
             if response != "delete":
                 return
             try:
-                self.pam.delete_profile(p.name)
-            except (PamError, StoreError) as e:
+                self.ceb.delete_profile(p.name)
+            except (CebError, StoreError) as e:
                 self.error("Could Not Delete the Profile", str(e))
                 return
             try:
@@ -788,7 +788,7 @@ class PamWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _on_about(self) -> None:
-        about = Adw.AboutDialog(application_name="PAM", application_icon=self.get_application().get_application_id(),
+        about = Adw.AboutDialog(application_name="CEB", application_icon=self.get_application().get_application_id(),
                                 developer_name="Kevin Willis", version=_version(),
                                 license_type=Gtk.License.MIT_X11,
                                 comments="Display and audio profiles for GNOME")
@@ -809,21 +809,21 @@ class PamWindow(Adw.ApplicationWindow):
             if not self._shown_is_stored(name):
                 # profiles.json changed outside this window: show what would be applied first.
                 self.reload(select=self.current)
-                self.toast(f"“{name}” was changed outside PAM's window; check it and press Apply again")
+                self.toast(f"“{name}” was changed outside CEB's window; check it and press Apply again")
                 return
         self._set_applying(True)
         dry = self.dry_run
 
         def work():
             try:
-                result = self.pam.apply(name, dry_run=dry, allow_missing=allow_missing)
+                result = self.ceb.apply(name, dry_run=dry, allow_missing=allow_missing)
             except Exception as e:  # report anything; never leave the button disabled
                 result = e
             GLib.idle_add(self._apply_done, name, allow_missing, result)
 
         # Not a daemon thread: if the program ends while a switch is running, Python waits for it
         # instead of killing it half-way (screens changed, audio not yet).
-        self._apply_thread = threading.Thread(target=work, name="pam-apply")
+        self._apply_thread = threading.Thread(target=work, name="ceb-apply")
         self._apply_thread.start()
 
     def _set_applying(self, on: bool) -> None:
@@ -933,7 +933,7 @@ class PamWindow(Adw.ApplicationWindow):
                 state = e
             GLib.idle_add(self._monitors_read, state)
 
-        threading.Thread(target=work, name="pam-monitors", daemon=True).start()
+        threading.Thread(target=work, name="ceb-monitors", daemon=True).start()
         return False
 
     def _monitors_read(self, state) -> bool:
@@ -954,7 +954,7 @@ class PamWindow(Adw.ApplicationWindow):
             # Closing now would end the program in the middle of a switch (screens changed, audio
             # not yet). Close when it is done; if it fails, stay open and show why.
             self._close_after_apply = True
-            self.toast("PAM closes when the switch is done")
+            self.toast("CEB closes when the switch is done")
             return True
         self._closed = True
         if self._signal_id is not None:
@@ -972,15 +972,15 @@ class PamWindow(Adw.ApplicationWindow):
 
     def forget_screen(self, sid: ScreenId) -> None:
         try:
-            self.pam.forget_screen(sid)
-        except (StoreError, PamError) as e:
+            self.ceb.forget_screen(sid)
+        except (StoreError, CebError) as e:
             self.error("Could Not Forget the Screen", str(e))
         self.reload(select=self.current)
 
     def forget_audio(self, kind: str, name: str) -> None:
         try:
-            self.pam.forget_audio(kind, name)
-        except (StoreError, PamError) as e:
+            self.ceb.forget_audio(kind, name)
+        except (StoreError, CebError) as e:
             self.error("Could Not Forget the Device", str(e))
         self.reload(select=self.current)
 
@@ -988,7 +988,7 @@ class PamWindow(Adw.ApplicationWindow):
 class ShortcutDialog(Adw.Dialog):
     """Press the new keys (as in GNOME Settings): Esc cancels, Backspace removes the shortcut."""
 
-    def __init__(self, window: PamWindow, profile: str):
+    def __init__(self, window: CebWindow, profile: str):
         super().__init__(title="Set Shortcut", content_width=440)
         self.window, self.profile = window, profile
         view = Adw.ToolbarView()
@@ -1073,16 +1073,16 @@ _STRONG_MODS = (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.
 
 
 class RememberedDialog(Adw.Dialog):
-    """Screens and audio devices PAM remembers that are not connected now, each with Forget."""
+    """Screens and audio devices CEB remembers that are not connected now, each with Forget."""
 
-    def __init__(self, window: PamWindow):
+    def __init__(self, window: CebWindow):
         super().__init__(title="Remembered Devices", content_width=560, content_height=560)
         self.window = window
         view = Adw.ToolbarView()
         view.add_top_bar(Adw.HeaderBar())
-        self.page = Adw.PreferencesPage(description="PAM remembers every screen and audio device it has seen, so "
+        self.page = Adw.PreferencesPage(description="CEB remembers every screen and audio device it has seen, so "
                                                     "profiles can use them while they are unplugged. Forget the ones "
-                                                    "you no longer have. Connected ones are not listed: PAM would "
+                                                    "you no longer have. Connected ones are not listed: CEB would "
                                                     "remember them again at once.")
         view.set_content(self.page)
         self.set_child(view)
@@ -1160,13 +1160,13 @@ def _checked_list_factory(row: Adw.ComboRow) -> Gtk.SignalListItemFactory:
     def bind(_f, item):
         item.get_child().get_first_child().set_label(item.get_item().get_string())
         update(item)
-        item.pam_handler = row.connect("notify::selected", lambda *_: update(item))
+        item.ceb_handler = row.connect("notify::selected", lambda *_: update(item))
 
     def unbind(_f, item):
-        handler = getattr(item, "pam_handler", None)
+        handler = getattr(item, "ceb_handler", None)
         if handler is not None:
             row.disconnect(handler)
-            item.pam_handler = None
+            item.ceb_handler = None
 
     factory.connect("setup", setup)
     factory.connect("bind", bind)
@@ -1191,6 +1191,6 @@ def _bullets(lines: list[str]) -> str:
 def _version() -> str:
     try:
         from importlib.metadata import version
-        return version("pam-profiles")
+        return version("ceb-profiles")
     except Exception:
         return ""

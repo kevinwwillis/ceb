@@ -19,17 +19,17 @@ if os.environ.get("GDK_BACKEND") != "broadway":  # never open windows on a real 
 if not Gtk.init_check() or Gdk.Display.get_default() is None:
     pytest.skip("no display for GTK", allow_module_level=True)
 
-from pam_profiles.core import Pam  # noqa: E402
-from pam_profiles.gui import editor  # noqa: E402
-from pam_profiles.gui.demo import DemoAudio, DemoDisplay, seed  # noqa: E402
-from pam_profiles.gui.shortcuts import Shortcuts  # noqa: E402
-from pam_profiles.gui.window import PamWindow, ShortcutDialog, same_accel  # noqa: E402
-from pam_profiles.store import Store  # noqa: E402
+from ceb_profiles.core import Ceb  # noqa: E402
+from ceb_profiles.gui import editor  # noqa: E402
+from ceb_profiles.gui.demo import DemoAudio, DemoDisplay, seed  # noqa: E402
+from ceb_profiles.gui.shortcuts import Shortcuts  # noqa: E402
+from ceb_profiles.gui.window import CebWindow, ShortcutDialog, same_accel  # noqa: E402
+from ceb_profiles.store import Store  # noqa: E402
 
 
 @pytest.fixture(scope="module")
 def app():
-    application = Adw.Application(application_id="io.github.kevinwwillis.Pam.Test",
+    application = Adw.Application(application_id="io.github.kevinwwillis.Ceb.Test",
                                   flags=Gio.ApplicationFlags.NON_UNIQUE)
     application.register(None)
     return application
@@ -37,10 +37,10 @@ def app():
 
 @pytest.fixture
 def win(tmp_path, app):
-    pam = Pam(display=DemoDisplay(), audio=DemoAudio(), store=Store(tmp_path / "pam"))
-    shortcuts = Shortcuts(backend=Gio.memory_settings_backend_new(), command="pam")
-    seed(pam, shortcuts, same_accel)
-    w = PamWindow(app, pam, shortcuts, demo=True)
+    ceb = Ceb(display=DemoDisplay(), audio=DemoAudio(), store=Store(tmp_path / "ceb"))
+    shortcuts = Shortcuts(backend=Gio.memory_settings_backend_new(), command="ceb")
+    seed(ceb, shortcuts, same_accel)
+    w = CebWindow(app, ceb, shortcuts, demo=True)
     yield w
     w.destroy()
 
@@ -72,16 +72,16 @@ def test_sidebar_lists_profiles_and_selects_the_primary(win):
 def test_add_turn_off_and_primary_are_saved(win):
     projector = next(k.screen for k in win.known.screens if k.screen.identity.vendor == "STK")
     win._on_add_screen(None, projector)
-    stored = win.pam.profile("Desk — 3 monitors")
+    stored = win.ceb.profile("Desk — 3 monitors")
     assert projector in editor.screen_ids(stored)
     assert len(win.canvas.items) == 4 and not win.canvas.items[-1].connected
 
     win.selected = projector
     win._on_make_primary(None)
-    assert editor.primary_screen(win.pam.profile("Desk — 3 monitors")) == projector
+    assert editor.primary_screen(win.ceb.profile("Desk — 3 monitors")) == projector
 
     win._on_turn_off(None)
-    stored = win.pam.profile("Desk — 3 monitors")
+    stored = win.ceb.profile("Desk — 3 monitors")
     assert projector not in editor.screen_ids(stored)
     assert sum(lm.primary for lm in stored.displays.logical_monitors) == 1
 
@@ -89,28 +89,28 @@ def test_add_turn_off_and_primary_are_saved(win):
 def test_canvas_move_is_saved_from_the_origin(win):
     left = win.profile().displays.logical_monitors[0].screens[0].screen
     win._on_canvas_moved(left, 0, 400, True)
-    xs = [(lm.x, lm.y) for lm in win.pam.profile("Desk — 3 monitors").displays.logical_monitors]
+    xs = [(lm.x, lm.y) for lm in win.ceb.profile("Desk — 3 monitors").displays.logical_monitors]
     assert min(x for x, _ in xs) == 0 and min(y for _, y in xs) == 0
 
 
 def test_audio_choice_is_saved_and_leave_unchanged_is_none(win):
     win.output_row.set_selected(0)  # "Leave unchanged"
-    assert win.pam.profile("Desk — 3 monitors").audio_output is None
+    assert win.ceb.profile("Desk — 3 monitors").audio_output is None
     win.output_row.set_selected(2)
-    assert win.pam.profile("Desk — 3 monitors").audio_output.description == "GA102 HDMI 2 (NVIDIA)"
+    assert win.ceb.profile("Desk — 3 monitors").audio_output.description == "GA102 HDMI 2 (NVIDIA)"
 
 
 def test_apply_sends_method_1_only_in_demo_and_dry_run_sends_only_0(win):
     win._on_apply()
     assert spin(lambda: not win._applying)
-    assert [m for m, _ in win.pam.display.sent] == [0, 1]
+    assert [m for m, _ in win.ceb.display.sent] == [0, 1]
     win.dry_run = True
-    win.pam.display.sent.clear()
+    win.ceb.display.sent.clear()
     win._on_apply()
     assert spin(lambda: not win._applying)
-    assert [m for m, _ in win.pam.display.sent] == [0]
-    assert win.pam.audio.sent == [("output", win.pam.profile("Desk — 3 monitors").audio_output.name),
-                                  ("input", win.pam.profile("Desk — 3 monitors").audio_input.name)]
+    assert [m for m, _ in win.ceb.display.sent] == [0]
+    assert win.ceb.audio.sent == [("output", win.ceb.profile("Desk — 3 monitors").audio_output.name),
+                                  ("input", win.ceb.profile("Desk — 3 monitors").audio_input.name)]
 
 
 def test_set_shortcut_refuses_a_clash_and_sets_a_free_one(win):
@@ -126,37 +126,37 @@ class OnlyRogActive(DemoDisplay):
     """The desk with only the ROG on, so applying "Desk" turns screens on (HDMI audio may follow)."""
 
     def get_state(self):
-        from pam_profiles.gui.demo import DESK
-        from pam_profiles.mutter import parse_current_state
+        from ceb_profiles.gui.demo import DESK
+        from ceb_profiles.mutter import parse_current_state
         specs = {m[0][0]: m[0] for m in DESK}
         return parse_current_state((self.serial, DESK, [(0, 0, 1.0, 0, True, [specs["HDMI-3"]], {})],
                                     {"layout-mode": 1, "supports-changing-layout-mode": False}))
 
 
 def test_late_hdmi_audio_waits_off_the_main_loop_and_never_offers_apply_the_rest(win):
-    from pam_profiles.model import AudioRef
+    from ceb_profiles.model import AudioRef
     shown = []
     win.error = lambda head, body: shown.append(("error", head, body))
     win._ask_apply_rest = lambda name, r: shown.append(("ask", name))
-    win.pam.display = OnlyRogActive()
-    p = win.pam.profile("Desk — 3 monitors")
+    win.ceb.display = OnlyRogActive()
+    p = win.ceb.profile("Desk — 3 monitors")
     p.audio_output = AudioRef("alsa_output.pci-0000_2d_00.1.hdmi-stereo-extra9", "GA102 HDMI 9")
-    win.pam.put_profile(p)
+    win.ceb.put_profile(p)
     win.reload(select=win.current)  # the window shows what was stored
-    win.pam.audio_appear_wait_s = 1.0
+    win.ceb.audio_appear_wait_s = 1.0
 
     ticks = []
     GLib.timeout_add(20, lambda: ticks.append(1) or win._applying)
     win._on_apply()
     assert spin(lambda: not win._applying, timeout=10)
     assert len(ticks) >= 10  # the main loop kept running during the 1 s wait
-    assert [m for m, _ in win.pam.display.sent] == [0, 1]
+    assert [m for m, _ in win.ceb.display.sent] == [0, 1]
     assert [s[0] for s in shown] == ["error"]
     assert "Partly Applied" in shown[0][1] and "HDMI 9" in shown[0][2]
 
 
 def test_history_problem_is_shown_in_the_banner(win, tmp_path):
-    win.pam.store.known_path.write_text("{not json")
+    win.ceb.store.known_path.write_text("{not json")
     win.reload(select=win.current)
     assert win.banner.get_revealed()
     assert "history not updated" in win.banner.get_title()
@@ -189,22 +189,22 @@ def dialogs(monkeypatch):
     return got
 
 
-def slow(pam, seconds):
-    real = pam.apply
+def slow(ceb, seconds):
+    real = ceb.apply
     calls = []
 
     def apply(name, **kw):
         calls.append((name, kw))
         time.sleep(seconds)
         return real(name, **kw)
-    pam.apply = apply
+    ceb.apply = apply
     return calls
 
 
 def test_apply_the_rest_applies_the_profile_the_dialog_named(win, dialogs):
     projector = next(k.screen for k in win.known.screens if k.screen.identity.vendor == "STK")
     win._on_add_screen(None, projector)          # "Desk" now needs a screen that is not connected
-    calls = slow(win.pam, 0)
+    calls = slow(win.ceb, 0)
     win._on_apply()
     assert spin(lambda: not win._applying) and dialogs
     assert "Desk" in dialogs[-1].get_heading()
@@ -217,20 +217,20 @@ def test_apply_the_rest_applies_the_profile_the_dialog_named(win, dialogs):
 
 def test_closing_during_apply_waits_for_it_then_closes(win):
     shown(win)
-    calls = slow(win.pam, 0.6)
+    calls = slow(win.ceb, 0.6)
     win._on_apply()
     assert win._applying and win.apply_spinner.get_visible() and win.apply_label.get_label() == "Applying…"
     win.close()
     spin(lambda: False, 0.1)
     assert win.get_visible() and win._applying      # still open, switch still running
     assert spin(lambda: not win.get_visible(), 5)   # closed once it was done
-    assert [m for m, _ in win.pam.display.sent] == [0, 1] and len(calls) == 1
+    assert [m for m, _ in win.ceb.display.sent] == [0, 1] and len(calls) == 1
 
 
 def test_closing_during_a_failed_apply_stays_open_and_says_why(win, dialogs):
     shown(win)
-    win.pam.display.apply = lambda *a: (_ for _ in ()).throw(__import__("pam_profiles.mutter").mutter.DisplayError("refused"))
-    slow(win.pam, 0.3)
+    win.ceb.display.apply = lambda *a: (_ for _ in ()).throw(__import__("ceb_profiles.mutter").mutter.DisplayError("refused"))
+    slow(win.ceb, 0.3)
     win._on_apply()
     win.close()
     assert spin(lambda: not win._applying)
@@ -283,7 +283,7 @@ def test_ctrl_arrow_moves_the_selected_screen_and_arrows_select(win):
     while win.selected != right:
         win.canvas._key(None, Gdk.KEY_Right, 0, 0)
     win.canvas._key(None, Gdk.KEY_Down, 0, Gdk.ModifierType.CONTROL_MASK)
-    lms = win.pam.profile("Desk — 3 monitors").displays.logical_monitors
+    lms = win.ceb.profile("Desk — 3 monitors").displays.logical_monitors
     assert (lms[2].x, lms[2].y) == (3840, 200) and (lms[0].y, lms[1].y) == (0, 0)
     assert win.selected == right
 
@@ -292,7 +292,7 @@ def test_a_click_never_moves_a_screen(win):
     shown(win)
     right = win.profile().displays.logical_monitors[2].screens[0].screen
     win._on_canvas_moved(right, 3840, 60, True)     # valid, but 60 px off its neighbour's top
-    before = win.pam.profile("Desk — 3 monitors").to_json()
+    before = win.ceb.profile("Desk — 3 monitors").to_json()
     c = win.canvas
     s, ox, oy = c._view_now()
     item = next(it for it in c.items if it.key == right)
@@ -300,7 +300,7 @@ def test_a_click_never_moves_a_screen(win):
     c._drag_begin(None, px, py)
     c._drag_update(None, 2, -2)                     # hand jitter during a click
     c._drag_end(None, 2, -2)
-    assert win.pam.profile("Desk — 3 monitors").to_json() == before
+    assert win.ceb.profile("Desk — 3 monitors").to_json() == before
     assert win.selected == right
 
 
@@ -328,26 +328,26 @@ def test_mirrored_screens_can_each_be_selected_and_turned_off(win):
     win._on_select_member(None, right)
     assert win.selected == right and win.selected_title.get_label() == "Lenovo LI2364d"
     win._on_turn_off(None)
-    stored = win.pam.profile("Desk — 3 monitors")
+    stored = win.ceb.profile("Desk — 3 monitors")
     assert right not in editor.screen_ids(stored) and left in editor.screen_ids(stored)
 
 
 def test_an_edit_never_overwrites_a_newer_profile_from_outside(win):
-    win.pam.display = OnlyRogActive()
-    win.pam.save_current("Desk — 3 monitors", overwrite=True)   # `pam save-current ... --force`
-    newer = win.pam.profile("Desk — 3 monitors").to_json()
+    win.ceb.display = OnlyRogActive()
+    win.ceb.save_current("Desk — 3 monitors", overwrite=True)   # `ceb save-current ... --force`
+    newer = win.ceb.profile("Desk — 3 monitors").to_json()
     win.output_row.set_selected(0)                                # an edit on the old version
-    assert win.pam.profile("Desk — 3 monitors").to_json() == newer
+    assert win.ceb.profile("Desk — 3 monitors").to_json() == newer
     assert spin(lambda: len(win.canvas.items) == 1)               # the window shows the newer one
     win.output_row.set_selected(0)                                # now on the version shown
-    assert win.pam.profile("Desk — 3 monitors").audio_output is None
+    assert win.ceb.profile("Desk — 3 monitors").audio_output is None
 
 
 def test_apply_after_an_outside_change_shows_it_first(win):
-    win.pam.display = OnlyRogActive()
-    win.pam.save_current("Desk — 3 monitors", overwrite=True)
+    win.ceb.display = OnlyRogActive()
+    win.ceb.save_current("Desk — 3 monitors", overwrite=True)
     win._on_apply()
-    assert not win._applying and win.pam.display.sent == []
+    assert not win._applying and win.ceb.display.sent == []
     assert len(win.canvas.items) == 1
 
 
@@ -382,14 +382,14 @@ def test_demo_shortcuts_do_not_clash_with_gnome(win):
 def test_monitors_changed_waits_for_a_drag_and_reads_off_the_main_loop(win, monkeypatch):
     shown(win)
     win.MONITORS_SETTLE_MS = win.MONITORS_RETRY_MS = 20
-    real = win.pam.display.get_state
+    real = win.ceb.display.get_state
     reads = []
 
     def slow_state():
         reads.append(1)
         time.sleep(0.5)
         return real()
-    win.pam.display.get_state = slow_state
+    win.ceb.display.get_state = slow_state
     win.canvas._drag = (0, win.canvas.items[0].rect)              # a drag in progress
     win._monitors_changed()
     spin(lambda: False, 0.3)
@@ -404,24 +404,24 @@ def test_monitors_changed_waits_for_a_drag_and_reads_off_the_main_loop(win, monk
 def test_forget_a_remembered_screen_and_audio_device(win):
     projector = next(k.screen for k in win.known.screens if k.screen.identity.vendor == "STK")
     win.forget_screen(projector)
-    assert projector not in [k.screen for k in win.pam.known().screens]
+    assert projector not in [k.screen for k in win.ceb.known().screens]
     assert projector not in [k.screen for k in win.known.screens]
     win.forget_audio("output", "nonexistent")       # not remembered: nothing happens
-    from pam_profiles.store import KnownAudio
-    k = win.pam.known()
+    from ceb_profiles.store import KnownAudio
+    k = win.ceb.known()
     k.inputs.append(KnownAudio("alsa_input.gone", "Old Microphone"))
-    win.pam.store.save_known(k)
+    win.ceb.store.save_known(k)
     win.forget_audio("input", "alsa_input.gone")
-    assert "alsa_input.gone" not in [a.name for a in win.pam.known().inputs]
+    assert "alsa_input.gone" not in [a.name for a in win.ceb.known().inputs]
     assert "alsa_input.gone" not in [a.name for a in win.known.inputs]
 
 
 def test_remembered_dialog_lists_only_devices_that_are_not_connected(win):
-    from pam_profiles.gui.window import RememberedDialog
-    from pam_profiles.store import KnownAudio
-    k = win.pam.known()
+    from ceb_profiles.gui.window import RememberedDialog
+    from ceb_profiles.store import KnownAudio
+    k = win.ceb.known()
     k.outputs.append(KnownAudio("alsa_output.gone", "Old Speakers"))
-    win.pam.store.save_known(k)
+    win.ceb.store.save_known(k)
     win.reload(select=win.current)
     d = RememberedDialog(win)
     titles = []
@@ -437,8 +437,8 @@ def test_remembered_dialog_lists_only_devices_that_are_not_connected(win):
 def test_a_screen_read_that_ends_after_the_window_closed_is_dropped(win):
     shown(win)
     win.MONITORS_SETTLE_MS = 1
-    real = win.pam.display.get_state
-    win.pam.display.get_state = lambda: (time.sleep(0.3), real())[1]
+    real = win.ceb.display.get_state
+    win.ceb.display.get_state = lambda: (time.sleep(0.3), real())[1]
     win._monitors_changed()
     assert spin(lambda: win._monitors_reading)
     win.close()

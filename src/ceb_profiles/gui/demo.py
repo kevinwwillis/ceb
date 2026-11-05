@@ -1,4 +1,4 @@
-"""Demo backends for `pam-gui --demo`: example screens and audio devices, nothing real is touched.
+"""Demo backends for `ceb-gui --demo`: example screens and audio devices, nothing real is touched.
 
 The demo shows the GUI without a GNOME session (screenshots, development): the screens are a
 three-monitor desk (two identical Lenovo twins and an ASUS ROG) plus a remembered projector that is
@@ -53,7 +53,7 @@ class DemoDisplay:
         return parse_current_state(_reply(self.monitors, self.serial))
 
     def apply(self, serial, method, logical_monitors, properties):
-        assert method in (0, 1), "PAM never uses method 2"
+        assert method in (0, 1), "CEB never uses method 2"
         self.sent.append((method, logical_monitors))
 
 
@@ -89,18 +89,18 @@ class DemoAudio:
 DEMO_KEYS = {"Desk — 3 monitors": "<Super>F2", "Center only": "<Super>F3", "Projector": "<Super>F4"}
 
 
-def seed(pam, shortcuts, same=None) -> None:
+def seed(ceb, shortcuts, same=None) -> None:
     """Fill an empty store with the example history and three profiles, and give the example
     profiles their shortcuts (the in-memory shortcut settings start empty on every run). A shortcut
     that clashes with one GNOME or another custom shortcut uses is left out, as the window would
     refuse it (`same` compares two accelerators; the window's same_accel)."""
-    if not pam.profiles():
-        pam.observe(DemoDisplay(with_projector=True).get_state(), pam.audio.snapshot())
-        for p in _profiles(pam.display.get_state()):
-            pam.put_profile(p)
+    if not ceb.profiles():
+        ceb.observe(DemoDisplay(with_projector=True).get_state(), ceb.audio.snapshot())
+        for p in _profiles(ceb.display.get_state()):
+            ceb.put_profile(p)
     if shortcuts.available:
         have = shortcuts.all()
-        for p in pam.profiles():
+        for p in ceb.profiles():
             if p.name in DEMO_KEYS and p.name not in have and not shortcuts.clash(DEMO_KEYS[p.name], p.name, same):
                 shortcuts.set(p.name, DEMO_KEYS[p.name])
 

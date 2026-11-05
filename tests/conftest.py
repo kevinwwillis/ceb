@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import pytest
 
-from pam_profiles.audio import AudioError
-from pam_profiles.core import Pam
-from pam_profiles.model import AudioDevice, AudioState
-from pam_profiles.mutter import parse_current_state
-from pam_profiles.store import Store
+from ceb_profiles.audio import AudioError
+from ceb_profiles.core import Ceb
+from ceb_profiles.model import AudioDevice, AudioState
+from ceb_profiles.mutter import parse_current_state
+from ceb_profiles.store import Store
 
 SCALES = [1.0, 1.25, 1.3333333730697632, 1.5, 1.6666666269302368, 2.0]
 
@@ -140,7 +140,7 @@ class FakeAudio:
 
 @pytest.fixture(autouse=True)
 def private_dirs(tmp_path, monkeypatch):
-    """Keep every test away from the real ~/.config/pam and $XDG_RUNTIME_DIR."""
+    """Keep every test away from the real ~/.config/ceb and $XDG_RUNTIME_DIR."""
     runtime = tmp_path / "runtime"
     runtime.mkdir(mode=0o700)
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
@@ -149,10 +149,10 @@ def private_dirs(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def make_pam(tmp_path):
+def make_ceb(tmp_path):
     def make(*replies, audio=None, gpus=None):
         display = FakeDisplay(*replies, gpus=gpus)
-        pam = Pam(display=display, audio=audio or FakeAudio(), store=Store(tmp_path / "pam"))
-        pam._sleep = lambda s: None   # no real waiting for audio devices
-        return pam
+        ceb = Ceb(display=display, audio=audio or FakeAudio(), store=Store(tmp_path / "ceb"))
+        ceb._sleep = lambda s: None   # no real waiting for audio devices
+        return ceb
     return make

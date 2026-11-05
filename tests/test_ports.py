@@ -2,7 +2,7 @@ import itertools
 
 import pytest
 
-from pam_profiles.ports import port_sort_key, split_connector
+from ceb_profiles.ports import port_sort_key, split_connector
 
 
 @pytest.mark.parametrize("name,expected", [

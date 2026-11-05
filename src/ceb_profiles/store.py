@@ -1,6 +1,6 @@
-"""Profiles and the history of every screen and audio device PAM has seen.
+"""Profiles and the history of every screen and audio device CEB has seen.
 
-Files, in $XDG_CONFIG_HOME/pam/ (default ~/.config/pam/):
+Files, in $XDG_CONFIG_HOME/ceb/ (default ~/.config/ceb/):
   profiles.json  {"version": 1, "profiles": [Profile.to_json(), ...]}
   known.json     {"version": 1, "screens": [KnownScreen...], "audio": {"outputs": [...], "inputs": [...]}}
 
@@ -63,18 +63,18 @@ def open_lock_file(path: str | os.PathLike):
         fd = os.open(path, flags, 0o600)
     except OSError as e:
         if e.errno == errno.ELOOP:
-            raise StoreError(f"lock file {path} is a symlink; PAM will not use it (remove it)") from e
+            raise StoreError(f"lock file {path} is a symlink; CEB will not use it (remove it)") from e
         raise StoreError(f"could not open the lock file {path}: {e.strerror or e}") from e
     st = os.fstat(fd)
     if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
         os.close(fd)
-        raise StoreError(f"lock file {path} is not a regular file owned by you; PAM will not use it")
+        raise StoreError(f"lock file {path} is not a regular file owned by you; CEB will not use it")
     return os.fdopen(fd, "r+b")
 
 
 def default_config_dir() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    return Path(base) / "pam"
+    return Path(base) / "ceb"
 
 
 @dataclass
@@ -104,7 +104,7 @@ class KnownMode:
 
 @dataclass
 class KnownScreen:
-    """A screen PAM has seen at least once. For twins there is one entry per twin rank."""
+    """A screen CEB has seen at least once. For twins there is one entry per twin rank."""
 
     screen: ScreenId
     display_name: str
@@ -282,14 +282,14 @@ class Store:
         try:
             data = json.loads(text)
         except json.JSONDecodeError as e:
-            raise StoreError(f"{path} is not valid JSON ({e}); fix or move it, PAM will not overwrite it") from e
+            raise StoreError(f"{path} is not valid JSON ({e}); fix or move it, CEB will not overwrite it") from e
         if not isinstance(data, dict):
-            raise StoreError(f"{path} does not hold a JSON object; PAM will not overwrite it")
+            raise StoreError(f"{path} does not hold a JSON object; CEB will not overwrite it")
         version = data.get("version", SCHEMA_VERSION)
         if not isinstance(version, int) or isinstance(version, bool):
-            raise StoreError(f"{path} has version {version!r}, not a number; PAM will not overwrite it")
+            raise StoreError(f"{path} has version {version!r}, not a number; CEB will not overwrite it")
         if version > SCHEMA_VERSION:
-            raise StoreError(f"{path} was written by a newer PAM (schema {version}); PAM will not overwrite it")
+            raise StoreError(f"{path} was written by a newer CEB (schema {version}); CEB will not overwrite it")
         return data
 
     def _write(self, path: Path, data: dict) -> None:
@@ -328,7 +328,7 @@ class Store:
         try:
             return [Profile.from_json(p) for p in _list(data, "profiles")]
         except _INVALID as e:
-            raise StoreError(f"{self.profiles_path} has an invalid profile ({e!r}); PAM will not overwrite it") from e
+            raise StoreError(f"{self.profiles_path} has an invalid profile ({e!r}); CEB will not overwrite it") from e
 
     def save_profiles(self, profiles: list[Profile]) -> None:
         self._write(self.profiles_path, {"version": SCHEMA_VERSION,
@@ -343,7 +343,7 @@ class Store:
         try:
             return Known.from_json(data)
         except _INVALID as e:
-            raise StoreError(f"{self.known_path} has an invalid entry ({e!r}); PAM will not overwrite it") from e
+            raise StoreError(f"{self.known_path} has an invalid entry ({e!r}); CEB will not overwrite it") from e
 
     def save_known(self, known: Known) -> None:
         self._write(self.known_path, known.to_json())

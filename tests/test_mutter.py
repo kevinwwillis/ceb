@@ -3,8 +3,8 @@ import os
 import pytest
 
 from conftest import LENOVO, PROJECTOR, ROG, desk, mon, reply
-from pam_profiles.model import Identity
-from pam_profiles.mutter import (ApplyLogicalMonitor, ApplyMonitor, MutterDisplayConfig, find_gpu,
+from ceb_profiles.model import Identity
+from ceb_profiles.mutter import (ApplyLogicalMonitor, ApplyMonitor, MutterDisplayConfig, find_gpu,
                                  parse_current_state, remote_error_message)
 
 
@@ -56,8 +56,8 @@ def test_partial_gpu_lookup_never_reorders_twins(known):
 
 
 def test_partial_gpu_lookup_is_reported_in_the_plan():
-    from pam_profiles.model import DisplayLayout
-    from pam_profiles.planner import plan_display
+    from ceb_profiles.model import DisplayLayout
+    from ceb_profiles.planner import plan_display
     state = parse_current_state(reply([mon("HDMI-1", LENOVO), mon("HDMI-2", LENOVO)]),
                                 {"HDMI-2": "0000:2d:00.0"}.get)
     plan = plan_display(DisplayLayout([]), state)
@@ -120,7 +120,7 @@ def test_apply_variant_signature():
     gi.require_version("GLib", "2.0")
     from gi.repository import GLib
 
-    from pam_profiles.mutter import build_apply_variant
+    from ceb_profiles.mutter import build_apply_variant
     v = build_apply_variant(7, 1, [ApplyLogicalMonitor(1920, 0, 1.0, 0, True,
                                                        [ApplyMonitor("HDMI-3", "1920x1080@60.000")])],
                             {"layout-mode": 1}, GLib)

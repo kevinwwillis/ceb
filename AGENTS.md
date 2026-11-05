@@ -1,6 +1,6 @@
-# PAM — agent instructions
+# CEB — agent instructions
 
-PAM is a small GNOME app (Python, GTK 4, libadwaita) for display profiles: screen on/off and
+CEB is a small GNOME app (Python, GTK 4, libadwaita) for display profiles: screen on/off and
 positions, plus the audio output and input device for each profile. It remembers every screen it
 has seen, also unplugged ones. Public, MIT, published on GitHub. First release: GNOME only.
 

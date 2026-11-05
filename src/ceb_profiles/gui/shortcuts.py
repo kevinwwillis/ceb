@@ -7,9 +7,9 @@ holds one path per shortcut, and each path has the relocatable schema
 with `name`, `command` and `binding` (e.g. '<Super>F1'). They show up and can be edited in
 GNOME Settings > Keyboard > Custom Shortcuts.
 
-PAM's shortcuts run `pam apply <profile>`. A shortcut belongs to a profile when its command is
-exactly that; PAM never touches other custom shortcuts. Every function takes a Gio settings backend
-so tests (and `pam-gui --demo`) can use an in-memory backend instead of the user's real settings.
+CEB's shortcuts run `ceb apply <profile>`. A shortcut belongs to a profile when its command is
+exactly that; CEB never touches other custom shortcuts. Every function takes a Gio settings backend
+so tests (and `ceb-gui --demo`) can use an in-memory backend instead of the user's real settings.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from gi.repository import Gio, GLib  # noqa: E402
 MEDIA_KEYS = "org.gnome.settings-daemon.plugins.media-keys"
 CUSTOM = MEDIA_KEYS + ".custom-keybinding"
 CUSTOM_DIR = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
-NAME_PREFIX = "PAM: "
+NAME_PREFIX = "CEB: "
 
 # Schemas whose keys hold GNOME's own shortcuts, checked for clashes.
 SYSTEM_SCHEMAS = ("org.gnome.desktop.wm.keybindings", "org.gnome.shell.keybindings",
@@ -38,13 +38,13 @@ class ShortcutError(Exception):
     pass
 
 
-def pam_command() -> str:
-    """The `pam` executable a shortcut should run: the one installed next to this program, else the
-    one on PATH, else plain 'pam'."""
-    here = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0] or "")), "pam")
+def ceb_command() -> str:
+    """The `ceb` executable a shortcut should run: the one installed next to this program, else the
+    one on PATH, else plain 'ceb'."""
+    here = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0] or "")), "ceb")
     if os.path.isfile(here) and os.access(here, os.X_OK):
         return here
-    return shutil.which("pam") or "pam"
+    return shutil.which("ceb") or "ceb"
 
 
 def _schema(schema_id: str):
@@ -55,7 +55,7 @@ def _schema(schema_id: str):
 class Shortcuts:
     def __init__(self, backend: Gio.SettingsBackend | None = None, command: str | None = None):
         self.backend = backend
-        self.command = command or pam_command()
+        self.command = command or ceb_command()
         self.available = _schema(MEDIA_KEYS) is not None and _schema(CUSTOM) is not None
 
     # -------------------------------------------------------------- settings objects
@@ -79,16 +79,16 @@ class Shortcuts:
 
     @staticmethod
     def profile_of(command: str) -> str | None:
-        """The profile a custom shortcut's command applies, if it is a PAM shortcut."""
+        """The profile a custom shortcut's command applies, if it is a CEB shortcut."""
         try:
             ok, argv = GLib.shell_parse_argv(command)
         except GLib.Error:
             return None
-        if ok and len(argv) == 3 and os.path.basename(argv[0]) == "pam" and argv[1] == "apply":
+        if ok and len(argv) == 3 and os.path.basename(argv[0]) == "ceb" and argv[1] == "apply":
             return argv[2]
         return None
 
-    def _pam_entries(self) -> dict[str, tuple[str, Gio.Settings]]:
+    def _ceb_entries(self) -> dict[str, tuple[str, Gio.Settings]]:
         out = {}
         for path in self._list():
             entry = self._entry(path)
@@ -101,7 +101,7 @@ class Shortcuts:
         """Profile name -> accelerator (e.g. '<Super>F1'), for profiles that have a shortcut."""
         if not self.available:
             return {}
-        return {name: entry.get_string("binding") for name, (_p, entry) in self._pam_entries().items()
+        return {name: entry.get_string("binding") for name, (_p, entry) in self._ceb_entries().items()
                 if entry.get_string("binding")}
 
     def get(self, profile: str) -> str | None:
@@ -111,7 +111,7 @@ class Shortcuts:
 
     def set(self, profile: str, accel: str | None) -> None:
         """Give a profile a shortcut, or remove it (accel None or '')."""
-        entries = self._pam_entries()
+        entries = self._ceb_entries()
         found = entries.get(profile)
         if not accel:
             if found:
@@ -131,7 +131,7 @@ class Shortcuts:
         Gio.Settings.sync()
 
     def rename(self, old: str, new: str) -> None:
-        found = self._pam_entries().get(old)
+        found = self._ceb_entries().get(old)
         if found:
             path, entry = found
             entry.set_string("name", NAME_PREFIX + new)
@@ -148,9 +148,9 @@ class Shortcuts:
     def _free_path(self) -> str:
         used = set(self._list())
         n = 0
-        while f"{CUSTOM_DIR}pam{n}/" in used:
+        while f"{CUSTOM_DIR}ceb{n}/" in used:
             n += 1
-        return f"{CUSTOM_DIR}pam{n}/"
+        return f"{CUSTOM_DIR}ceb{n}/"
 
     # -------------------------------------------------------------- clashes
 

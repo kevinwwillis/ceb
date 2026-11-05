@@ -128,7 +128,7 @@ def _missing_screen_message(ps: ProfileScreen, state: DisplayState, twin_total: 
     same = [m for m in state.monitors if m.identity == sid.identity]
     msg = f"{describe_screen(sid, twin_total.get(sid.identity))} is not connected"
     if same:
-        msg += (f"; only {len(same)} screen(s) of this model are connected, so PAM cannot tell which "
+        msg += (f"; only {len(same)} screen(s) of this model are connected, so CEB cannot tell which "
                 f"of the identical twins is unplugged")
     return msg
 
