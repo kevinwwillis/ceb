@@ -1,6 +1,7 @@
 """CEB's main window, built from the picked mockup (option A, "Settings-style sidebar").
 
-Header bar: + (new profile), the title, a menu (rename, delete, about) and Apply.
+Header bar: + (new profile), the title, a menu (rename, delete, remembered devices, remember screens
+in the background, about) and Apply.
 Left: the profiles, each with its keyboard shortcut. Right, for the selected profile: the
 arrangement canvas, "Other screens" (screens not in this profile, connected or remembered, each with
 Add), "Selected screen" (Make primary, Turn off in profile), "Audio for this profile" (Output, Input,
@@ -19,6 +20,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
+from .. import desktop  # noqa: E402
 from ..audio import AudioError  # noqa: E402
 from ..core import ApplyResult, Ceb, CebError, ProfileChanged  # noqa: E402
 from ..model import AudioRef, Profile, ScreenId  # noqa: E402
@@ -27,7 +29,7 @@ from ..store import Known, StoreError  # noqa: E402
 from . import APP_ID, editor  # noqa: E402  (APP_ID: --demo runs as APP_ID.Demo, which has no icon)
 from .canvas import ArrangementCanvas, Item  # noqa: E402
 from .geometry import is_valid  # noqa: E402
-from .shortcuts import Shortcuts, ShortcutError  # noqa: E402
+from .shortcuts import NOT_FOUND, Shortcuts, ShortcutError, delete_profile  # noqa: E402
 
 CSS = """
 .ceb-sidebar-key { font-family: monospace; font-size: 0.85em; }
@@ -53,9 +55,15 @@ def same_accel(a: str, b: str) -> bool:
 
 class CebWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application, ceb: Ceb, shortcuts: Shortcuts, *, dry_run: bool = False,
-                 demo: bool = False):
+                 demo: bool = False, config_dir: str | None = None, autostart_base: str | None = None):
+        """config_dir: the non-default config folder (store.explicit_config_dir), passed on to the
+        background watcher's command. autostart_base: where the watcher's autostart entry goes
+        instead of $XDG_CONFIG_HOME (the demo and tests)."""
         super().__init__(application=app, title="CEB", default_width=1100, default_height=760)
         self.ceb, self.shortcuts, self.dry_run, self.demo = ceb, shortcuts, dry_run, demo
+        self.config_dir = config_dir
+        self.autostart_base = autostart_base
+        self._audio_events = None
         self.profiles: list[Profile] = []
         self.known = Known()
         self.display_state = None
@@ -120,6 +128,7 @@ class CebWindow(Adw.ApplicationWindow):
         menu.append_section(None, section)
         history = Gio.Menu()
         history.append("_Remembered Devices…", "win.remembered")
+        history.append("Remember Screens in the _Background", "win.remember-background")
         menu.append_section(None, history)
         about = Gio.Menu()
         about.append("_About CEB", "win.about")
@@ -251,6 +260,10 @@ class CebWindow(Adw.ApplicationWindow):
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", lambda _a, _p, cb=cb: cb())
             self.add_action(action)
+        background = Gio.SimpleAction.new_stateful(
+            "remember-background", None, GLib.Variant.new_boolean(self._background_on()))
+        background.connect("change-state", self._on_remember_background)
+        self.add_action(background)
         app = self.get_application()
         app.set_accels_for_action("win.new-profile", ["<Control>n"])
         app.set_accels_for_action("win.apply", ["<Control>Return"])
@@ -307,6 +320,21 @@ class CebWindow(Adw.ApplicationWindow):
             problems.append(f"Could not read the keyboard shortcuts: {e}")
         if not self.shortcuts.available:
             problems.append("GNOME's shortcut settings are not installed; keyboard shortcuts are off")
+        elif not self.shortcuts.command:
+            problems.append(NOT_FOUND)
+        # A hand-edited profiles.json can hold two profiles with one name; CEB uses the first.
+        seen, unique, twice = set(), [], []
+        for p in self.profiles:
+            if p.name in seen:
+                if p.name not in twice:
+                    twice.append(p.name)
+                continue
+            seen.add(p.name)
+            unique.append(p)
+        if twice:
+            self.profiles = unique
+            problems.append(f"{self.ceb.store.profiles_path} has more than one profile named "
+                            + ", ".join(f"“{n}”" for n in twice) + "; CEB shows and uses the first of each")
         self._show_problems(problems)
         names = [p.name for p in self.profiles]
         if select in names:
@@ -494,7 +522,7 @@ class CebWindow(Adw.ApplicationWindow):
             if ps.screen == sid:
                 continue
             other = editor.label(ps.screen, self.known, self.display_state)
-            row = Adw.ActionRow(title=other.title,
+            row = Adw.ActionRow(title=GLib.markup_escape_text(other.title),
                                 subtitle="Mirrors the selected screen"
                                          + ("" if other.connected else " · not connected"))
             pick = Gtk.Button(label="Select", valign=Gtk.Align.CENTER,
@@ -772,14 +800,12 @@ class CebWindow(Adw.ApplicationWindow):
             if response != "delete":
                 return
             try:
-                self.ceb.delete_profile(p.name)
+                problem = delete_profile(self.ceb, self.shortcuts, p.name)  # the same code as `ceb delete`
             except (CebError, StoreError) as e:
                 self.error("Could Not Delete the Profile", str(e))
                 return
-            try:
-                self.shortcuts.set(p.name, None)
-            except (ShortcutError, GLib.Error) as e:
-                self.error("Shortcut Not Removed", str(e))
+            if problem:
+                self.error("Shortcut Not Removed", f"The profile was deleted, but {problem}")
             self.current = None
             self.reload()
             self.toast(f"Profile “{p.name}” deleted")
@@ -890,8 +916,14 @@ class CebWindow(Adw.ApplicationWindow):
     # ================================================================ GNOME's MonitorsChanged
 
     def _watch_monitors(self) -> None:
+        """Reload when GNOME's screens change (MonitorsChanged) or an audio device appears or goes
+        away (the audio server's events, in a background thread); both take the same deferred path,
+        so a reload never interrupts a drag or closes an open popover."""
         if self.demo:
             return
+        watch = getattr(self.ceb.audio, "watch", None)
+        if watch is not None:
+            self._audio_events = watch(lambda: GLib.idle_add(self._monitors_changed))
         try:
             self._bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         except GLib.Error:
@@ -957,6 +989,9 @@ class CebWindow(Adw.ApplicationWindow):
             self.toast("CEB closes when the switch is done")
             return True
         self._closed = True
+        if self._audio_events is not None:
+            self._audio_events.stop()
+            self._audio_events = None
         if self._signal_id is not None:
             self._bus.signal_unsubscribe(self._signal_id)
             self._signal_id = None
@@ -969,6 +1004,36 @@ class CebWindow(Adw.ApplicationWindow):
 
     def _on_remembered(self) -> None:
         RememberedDialog(self).present(self)
+
+    # ================================================================ background watcher
+
+    def _background_on(self) -> bool:
+        return desktop.autostart_enabled(self.config_dir, self._autostart_base())
+
+    def _autostart_base(self):
+        from pathlib import Path
+        return Path(self.autostart_base) if self.autostart_base else None
+
+    def _on_remember_background(self, action, value) -> None:
+        """Main menu > Remember Screens in the Background: an autostart entry that runs `ceb watch`
+        at login, and the watcher itself, started or stopped at once (not in the demo)."""
+        on = value.get_boolean()
+        try:
+            if on:
+                desktop.enable_autostart(self.config_dir, self._autostart_base())
+                if not self.demo:
+                    desktop.start_watcher(self.config_dir, self.ceb.store.dir)
+            else:
+                desktop.disable_autostart(self._autostart_base())
+                if not self.demo:
+                    desktop.stop_watcher(self.ceb.store.dir)
+        except (OSError, RuntimeError) as e:
+            self.error("Background Memory Not Changed", str(e))
+            action.set_state(GLib.Variant.new_boolean(self._background_on()))
+            return
+        action.set_state(value)
+        self.toast("CEB now remembers screens and audio devices in the background, also after you log in"
+                   if on else "CEB remembers screens and audio devices only while it runs")
 
     def forget_screen(self, sid: ScreenId) -> None:
         try:

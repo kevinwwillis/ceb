@@ -443,3 +443,165 @@ def test_a_screen_read_that_ends_after_the_window_closed_is_dropped(win):
     assert spin(lambda: win._monitors_reading)
     win.close()
     assert spin(lambda: not win._monitors_reading)   # the late result did not touch the closed window
+
+
+# ------------------------------------------------------------ final review fixes (2026-11-05)
+
+
+class WatchedAudio(DemoAudio):
+    """DemoAudio with the real backend's watch(): the test calls the callback as the audio
+    thread would."""
+
+    def __init__(self):
+        super().__init__()
+        self.callbacks, self.stopped = [], False
+
+    def watch(self, callback):
+        self.callbacks.append(callback)
+        audio = self
+
+        class Events:
+            def stop(self, timeout=None):
+                audio.stopped = True
+        return Events()
+
+
+def test_audio_device_plugged_in_while_open_shows_in_the_pickers(tmp_path, app):
+    import threading
+    from ceb_profiles.model import AudioDevice
+    audio = WatchedAudio()
+    ceb = Ceb(display=DemoDisplay(), audio=audio, store=Store(tmp_path / "ceb"))
+    shortcuts = Shortcuts(backend=Gio.memory_settings_backend_new(), command="ceb")
+    seed(ceb, shortcuts, same_accel)
+    w = CebWindow(app, ceb, shortcuts, dry_run=True)  # not the demo: it watches devices
+    try:
+        w.MONITORS_SETTLE_MS = w.MONITORS_RETRY_MS = 20
+        assert len(audio.callbacks) == 1
+        new = AudioDevice("alsa_output.usb-Plugged_In_Later-00.analog-stereo", "Plugged-In Speaker")
+        audio.state.outputs.append(new)
+        threading.Thread(target=audio.callbacks[0]).start()      # from the audio thread
+        names = lambda: [w.output_row.get_model().get_string(i)
+                         for i in range(w.output_row.get_model().get_n_items())]
+        assert spin(lambda: "Plugged-In Speaker" in names())
+        assert any(k.name == new.name for k in ceb.known().outputs)  # remembered too
+        shown(w)
+        w.close()
+        assert audio.stopped
+    finally:
+        w.destroy()
+
+
+def test_audio_event_waits_while_a_popover_is_open(tmp_path, app, monkeypatch):
+    audio = WatchedAudio()
+    ceb = Ceb(display=DemoDisplay(), audio=audio, store=Store(tmp_path / "ceb"))
+    shortcuts = Shortcuts(backend=Gio.memory_settings_backend_new(), command="ceb")
+    seed(ceb, shortcuts, same_accel)
+    w = CebWindow(app, ceb, shortcuts, dry_run=True)
+    try:
+        w.MONITORS_SETTLE_MS = w.MONITORS_RETRY_MS = 20
+        reads = []
+        real = w._read_state
+        monkeypatch.setattr(w, "_read_state", lambda: reads.append(1) or real())
+        busy = [True]
+        monkeypatch.setattr(w, "_busy", lambda: busy[0])
+        audio.callbacks[0]()
+        spin(lambda: False, 0.3)
+        assert reads == []                     # nothing redrawn while the popover is open
+        busy[0] = False
+        assert spin(lambda: reads)
+    finally:
+        w.destroy()
+
+
+def test_duplicate_profile_names_show_once_and_are_reported(win):
+    import json
+    path = win.ceb.store.profiles_path
+    data = json.loads(path.read_text())
+    copy_ = dict(data["profiles"][1])
+    data["profiles"].append(copy_)
+    path.write_text(json.dumps(data))
+    win.reload(select=win.current)
+    assert rows(win.sidebar_list) == ["Desk — 3 monitors", "Center only", "Projector"]
+    assert "more than one profile named “Center only”" in win.banner.get_title()
+
+
+def test_mirror_row_title_is_escaped(win):
+    desk = win.profile()
+    # The screen on HDMI-2 (the right one in "Desk") gets a name with markup characters.
+    win.ceb.display.monitors = [((c, *rest), modes, dict(props, **{"display-name": "<b>Dell&Co 27\""}))
+                                if c == "HDMI-2" else ((c, *rest), modes, props)
+                                for (c, *rest), modes, props in win.ceb.display.monitors]
+
+    def mirror(p):
+        a, b = p.displays.logical_monitors[0], p.displays.logical_monitors.pop(2)
+        a.screens.append(b.screens[0])
+    assert win.edit(mirror)
+    win.reload(select=win.current)
+    win._on_canvas_select(desk.displays.logical_monitors[0].screens[0].screen)
+    assert len(win.mirror_rows) == 1
+    assert win.mirror_rows[0].get_title() == "&lt;b&gt;Dell&amp;Co LI2364d"
+
+
+def test_delete_removes_the_profile_and_only_its_shortcut(win, monkeypatch, dialogs):
+    s = win.shortcuts
+    assert "Center only" in s.all()
+    win.current = "Center only"
+    win._on_delete()
+    dialogs[-1].emit("response", "delete")
+    assert "Center only" not in [p.name for p in win.ceb.profiles()]
+    assert "Center only" not in s.all() and "Desk — 3 monitors" in s.all()
+
+
+def test_remember_in_background_switch_writes_and_removes_autostart(tmp_path, app, monkeypatch):
+    from ceb_profiles import desktop
+    monkeypatch.setattr(desktop, "find_executable", lambda name: "/opt/ceb/bin/ceb")
+    ceb = Ceb(display=DemoDisplay(), audio=DemoAudio(), store=Store(tmp_path / "ceb"))
+    shortcuts = Shortcuts(backend=Gio.memory_settings_backend_new(), command="ceb")
+    seed(ceb, shortcuts, same_accel)
+    base = tmp_path / "autostart-base"
+    w = CebWindow(app, ceb, shortcuts, demo=True, config_dir="/home/k/profiles", autostart_base=str(base))
+    try:
+        action = w.lookup_action("remember-background")
+        assert action.get_state().get_boolean() is False
+        action.change_state(GLib.Variant.new_boolean(True))
+        path = base / "autostart" / "io.github.kevinwwillis.Ceb.Watch.desktop"
+        assert "Exec=/opt/ceb/bin/ceb --config-dir /home/k/profiles watch" in path.read_text()
+        assert action.get_state().get_boolean() is True
+        action.change_state(GLib.Variant.new_boolean(False))
+        assert not path.exists() and action.get_state().get_boolean() is False
+        # The real ~/.config/autostart (here the test's XDG_CONFIG_HOME) is never touched.
+        assert not (tmp_path / "config" / "autostart").exists()
+    finally:
+        w.destroy()
+
+
+def test_remember_in_background_is_in_the_main_menu(win):
+    menu = None
+    child = win.get_content()
+    stack = [child]
+    while stack:
+        widget = stack.pop()
+        if isinstance(widget, Gtk.MenuButton):
+            menu = widget.get_menu_model()
+        c = widget.get_first_child()
+        while c is not None:
+            stack.append(c)
+            c = c.get_next_sibling()
+    labels = []
+    for i in range(menu.get_n_items()):
+        section = menu.get_item_link(i, "section")
+        for j in range(section.get_n_items()):
+            labels.append((section.get_item_attribute_value(j, "label", None).get_string(),
+                           section.get_item_attribute_value(j, "action", None).get_string()))
+    assert ("Remember Screens in the _Background", "win.remember-background") in labels
+
+
+def test_no_installed_ceb_is_said_in_the_banner(tmp_path, app):
+    ceb = Ceb(display=DemoDisplay(), audio=DemoAudio(), store=Store(tmp_path / "ceb"))
+    shortcuts = Shortcuts(backend=Gio.memory_settings_backend_new(), command="ceb")
+    shortcuts.command = None
+    w = CebWindow(app, ceb, shortcuts, dry_run=True)
+    try:
+        assert "could not find its installed `ceb`" in w.banner.get_title()
+    finally:
+        w.destroy()
