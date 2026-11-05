@@ -8,7 +8,7 @@ Screens are recognised by their make, model and serial, not by the port they are
 profiles keep working when a multi-GPU machine renumbers its ports between boots. Two identical
 monitors are told apart by port order. Details: [docs/behavior.md](docs/behavior.md).
 
-Status: core library and command-line tool. The GTK window comes later.
+Status: core library, command-line tool and a first GTK 4 window.
 
 ## Install (development)
 
@@ -41,6 +41,32 @@ pam delete desk
 does a wrong command line when there is no terminal. Exit codes: 0 done, 1 failed or refused
 (nothing changed unless the message says "partly"), 2 wrong command line, 3 applied with parts
 skipped (`--allow-missing`).
+
+## Window
+
+```bash
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1   # GTK 4, libadwaita 1.7+
+pam-gui                 # or: pam gui
+pam-gui --dry-run       # Apply only asks GNOME to check the layout; nothing changes
+pam-gui --demo          # example screens and audio, throwaway store, in-memory shortcuts
+```
+
+Profiles are listed on the left with their keyboard shortcut. For the selected profile: drag the
+screens (they snap to each other's edges; a screen dropped where GNOME would refuse it moves to the
+nearest place GNOME accepts), add screens that are connected or remembered, make one primary or
+turn it off, pick the audio output and input ("Leave unchanged" keeps whatever is set), and set a
+keyboard shortcut. Every change is saved at once; Apply switches to the profile.
+
+Shortcuts are GNOME custom shortcuts (Settings > Keyboard > Custom Shortcuts) that run
+`pam apply <profile>`; PAM changes only the custom shortcuts whose command is exactly that.
+
+The window tests need a display; they run only under GTK's Broadway backend, so they never open a
+window on your desktop:
+
+```bash
+gtk4-broadwayd :7 &
+GDK_BACKEND=broadway BROADWAY_DISPLAY=:7 .venv/bin/pytest tests/test_gui_window.py
+```
 
 ## Library
 

@@ -213,6 +213,9 @@ class PamWindow(Adw.ApplicationWindow):
         bp.add_setter(self.split, "collapsed", True)
         bp.add_setter(self.sidebar_button, "visible", True)
         bp.add_setter(self.selected_layout, "orientation", Gtk.Orientation.VERTICAL)
+        # With minimize/maximize/close in the title bar the header needs 388 px; without the title
+        # it fits 360 px (GNOME's smallest window width).
+        bp.add_setter(self.title, "visible", False)
         self.add_breakpoint(bp)
 
     def _install_actions(self) -> None:
