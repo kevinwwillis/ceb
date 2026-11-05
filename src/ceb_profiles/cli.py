@@ -1,4 +1,8 @@
-"""Command-line interface: `ceb list`, `ceb show`, `ceb save-current`, `ceb apply`, `ceb delete`.
+"""Command-line interface: `ceb list`, `ceb show`, `ceb save-current`, `ceb apply`, `ceb delete`,
+`ceb watch`, `ceb install-desktop`, `ceb gui`.
+
+Profile names may start with "-"; on the command line such a name goes after `--`
+(`ceb apply -- -work`), as with any Unix tool. Keyboard shortcuts always write the `--`.
 
 `ceb apply <name>` is what keyboard shortcuts run. Every failure of `apply` (and any unexpected error)
 is shown as a desktop notification as well as printed, because a shortcut has no terminal.
@@ -24,7 +28,7 @@ from .model import Profile
 from .mutter import DisplayError
 from .notify import notify as desktop_notify
 from .planner import describe_screen
-from .store import Known, Store, StoreError
+from .store import Known, Store, StoreError, explicit_config_dir
 
 EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_PARTIAL = 0, 1, 2, 3
 
@@ -72,16 +76,43 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("gui", help="open the CEB window (same as ceb-gui; ceb gui --help for its options)",
                    add_help=False)
-    p = sub.add_parser("delete", help="delete a profile")
+    p = sub.add_parser("delete", help="delete a profile and its keyboard shortcut")
     p.add_argument("name")
+
+    sub.add_parser("watch", help="keep running and remember every screen and audio device that is "
+                                 "connected (what the window's 'Remember screens in the background' starts)")
+    p = sub.add_parser("install-desktop",
+                       help="add CEB to the applications menu (~/.local/share: .desktop file and icon)")
+    p.add_argument("--uninstall", action="store_true", help="remove them again")
     return ap
 
 
-def main(argv=None, *, ceb: Ceb | None = None, notifier=desktop_notify, on_terminal=None) -> int:
+def _split_gui(args: list[str]) -> tuple[list[str], list[str]] | None:
+    """`ceb [--config-dir DIR] gui [...]` -> (global options, gui arguments), else None."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--config-dir" and i + 1 < len(args):
+            i += 2
+        elif a.startswith("--config-dir="):
+            i += 1
+        elif a == "gui":
+            return args[:i], args[i + 1:]
+        else:
+            return None
+    return None
+
+
+def main(argv=None, *, ceb: Ceb | None = None, notifier=desktop_notify, on_terminal=None,
+         shortcuts=None) -> int:
+    """shortcuts: the gui.shortcuts.Shortcuts that `delete` removes a profile's shortcut from
+    (default: GNOME's, for this config folder)."""
     args = list(sys.argv[1:] if argv is None else argv)
-    if args[:1] == ["gui"]:  # `ceb gui [--dry-run|--demo|...]` is `ceb-gui`
+    gui = _split_gui(args)
+    if gui is not None:  # `ceb [--config-dir DIR] gui [--dry-run|--demo|...]` is `ceb-gui`
         from .gui import main as gui_main
-        return gui_main(args[1:])
+        global_opts, gui_args = gui
+        return gui_main(gui_args + global_opts)
     try:
         opts = build_parser().parse_args(args)
     except UsageError as e:
@@ -89,9 +120,16 @@ def main(argv=None, *, ceb: Ceb | None = None, notifier=desktop_notify, on_termi
     notify_failures = opts.command == "apply" and not opts.no_notify and not opts.dry_run
     sink = notifier if notify_failures else None
     try:
+        if opts.command == "install-desktop":
+            return cmd_install_desktop(opts)
+        if opts.command == "watch":
+            from .watch import run as watch_run
+            return watch_run(opts.config_dir, ceb=ceb)
         ceb = ceb or Ceb(store=Store(opts.config_dir))
+        if opts.command == "delete":
+            return cmd_delete(ceb, opts, shortcuts)
         handler = {"list": cmd_list, "show": cmd_show, "save-current": cmd_save,
-                   "apply": cmd_apply, "delete": cmd_delete}[opts.command]
+                   "apply": cmd_apply}[opts.command]
         return handler(ceb, opts, sink)
     except (CebError, StoreError) as e:
         return _fail(f"ceb {opts.command} failed", str(e), sink)
@@ -108,12 +146,18 @@ def _usage_error(e: UsageError, args: list[str], notifier, on_terminal) -> int:
     e.parser.print_usage(sys.stderr)
     # No "ceb:" in the title: stderr adds it ("ceb: Wrong command: ..."); the notification shows "CEB".
     title, body = "Wrong command", f"{e} (command: ceb {' '.join(args)})".rstrip()
+    if "argument" in str(e) and any(a.startswith("-") and a not in _KNOWN_OPTIONS for a in args):
+        body += ". A profile name that starts with - goes after --, for example: ceb apply -- -work"
     terminal = sys.stderr.isatty() if on_terminal is None else on_terminal
     if terminal or "--no-notify" in args or "--dry-run" in args:
         print(f"ceb: {title}: {body}", file=sys.stderr)
     else:
         notifier(title, body)  # also prints to stderr
     return EXIT_USAGE
+
+
+_KNOWN_OPTIONS = {"--config-dir", "--json", "--force", "--no-audio", "--dry-run", "--allow-missing",
+                  "--no-notify", "--uninstall", "--help", "-h", "--version", "--"}
 
 
 def _fail(title: str, body: str, notifier) -> int:
@@ -247,9 +291,38 @@ def cmd_save(ceb: Ceb, opts, _notifier) -> int:
     return EXIT_OK
 
 
-def cmd_delete(ceb: Ceb, opts, _notifier) -> int:
-    ceb.delete_profile(opts.name)
+def cmd_delete(ceb: Ceb, opts, shortcuts=None) -> int:
+    """Deletes the profile and its GNOME keyboard shortcut, as the window does (same code)."""
+    try:
+        from .gui.shortcuts import Shortcuts, delete_profile
+    except (ImportError, ValueError) as e:  # no PyGObject/Gio: the profile can still go
+        ceb.delete_profile(opts.name)
+        print(f"deleted profile {opts.name}")
+        print(f"ceb: its keyboard shortcut was not checked (GNOME's settings are not readable: {e})",
+              file=sys.stderr)
+        return EXIT_FAILED
+    if shortcuts is None:
+        shortcuts = Shortcuts(config_dir=explicit_config_dir(ceb.store.dir))
+    problem = delete_profile(ceb, shortcuts, opts.name)
     print(f"deleted profile {opts.name}")
+    if problem:
+        print(f"ceb: {problem}", file=sys.stderr)
+        return EXIT_FAILED
+    return EXIT_OK
+
+
+def cmd_install_desktop(opts) -> int:
+    from .desktop import install_desktop, uninstall_desktop
+    try:
+        lines = uninstall_desktop() if opts.uninstall else install_desktop()
+    except OSError as e:
+        print(f"ceb: install-desktop failed: {e}", file=sys.stderr)
+        return EXIT_FAILED
+    except RuntimeError as e:
+        print(f"ceb: {e}", file=sys.stderr)
+        return EXIT_FAILED
+    for line in lines:
+        print(line)
     return EXIT_OK
 
 
@@ -275,13 +348,24 @@ def cmd_apply(ceb: Ceb, opts, notifier) -> int:
         title = f"Profile {result.profile} not applied" + (" (dry run)" if result.dry_run else "")
         code, body = EXIT_FAILED, "Nothing was changed. " + detail
         if result.problems and not opts.allow_missing and not blocked:
-            body += ". Use --allow-missing to apply the rest."
+            body += (". To apply the rest, press Apply in CEB's window and choose Apply the Rest, or run "
+                     f"in a terminal: ceb{_dir_option(ceb)} apply --allow-missing -- {_quote(result.profile)}")
     if notifier:
         # Partial success is information, not an alarm: normal urgency.
         notifier(title, body, critical=code != EXIT_PARTIAL)  # also prints to stderr
     else:
         print(f"ceb: {title}: {body}", file=sys.stderr)
     return code
+
+
+def _quote(name: str) -> str:
+    import shlex
+    return shlex.quote(name)
+
+
+def _dir_option(ceb: Ceb) -> str:
+    folder = explicit_config_dir(getattr(ceb.store, "dir", None))
+    return f" --config-dir {_quote(folder)}" if folder else ""
 
 
 def _anything_applied(r: ApplyResult) -> bool:

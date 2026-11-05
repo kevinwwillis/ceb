@@ -7,16 +7,18 @@ holds one path per shortcut, and each path has the relocatable schema
 with `name`, `command` and `binding` (e.g. '<Super>F1'). They show up and can be edited in
 GNOME Settings > Keyboard > Custom Shortcuts.
 
-CEB's shortcuts run `ceb apply <profile>`. A shortcut belongs to a profile when its command is
-exactly that; CEB never touches other custom shortcuts. Every function takes a Gio settings backend
-so tests (and `ceb-gui --demo`) can use an in-memory backend instead of the user's real settings.
+CEB's shortcuts run `/absolute/path/to/ceb [--config-dir DIR] apply -- <profile>`: the absolute path
+because GNOME runs the command without the user's shell PATH, `--config-dir` only when the profiles
+are not in the default folder, and `--` so a name that starts with "-" is not read as an option. A
+shortcut belongs to a profile when its command is exactly that (the older form without `--` is
+recognised too); CEB never touches other custom shortcuts. Every function takes a Gio settings
+backend so tests (and `ceb-gui --demo`) can use an in-memory backend instead of the user's real
+settings.
 """
 from __future__ import annotations
 
 import os
 import shlex
-import shutil
-import sys
 
 import gi
 
@@ -38,13 +40,16 @@ class ShortcutError(Exception):
     pass
 
 
-def ceb_command() -> str:
-    """The `ceb` executable a shortcut should run: the one installed next to this program, else the
-    one on PATH, else plain 'ceb'."""
-    here = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0] or "")), "ceb")
-    if os.path.isfile(here) and os.access(here, os.X_OK):
-        return here
-    return shutil.which("ceb") or "ceb"
+NOT_FOUND = ("CEB could not find its installed `ceb` command, which keyboard shortcuts run. Install "
+             "CEB (see the README) so that `ceb` is on your PATH, then try again.")
+
+
+def ceb_command() -> str | None:
+    """The absolute path of the `ceb` executable a shortcut should run: the one installed next to
+    this program, else next to this Python, else the one on PATH. None if there is none: a bare
+    'ceb' is never used, because GNOME may not find it (its PATH is not the shell's)."""
+    from ..desktop import find_executable
+    return find_executable("ceb")
 
 
 def _schema(schema_id: str):
@@ -53,9 +58,15 @@ def _schema(schema_id: str):
 
 
 class Shortcuts:
-    def __init__(self, backend: Gio.SettingsBackend | None = None, command: str | None = None):
+    def __init__(self, backend: Gio.SettingsBackend | None = None, command: str | None = None,
+                 config_dir: str | None = None):
+        """command: the `ceb` to run (default: ceb_command(); None when it cannot be found, and then
+        a shortcut cannot be set). config_dir: the non-default config folder the profiles are in
+        (store.explicit_config_dir), which the shortcut's command passes as --config-dir; only
+        shortcuts for that folder are this object's."""
         self.backend = backend
         self.command = command or ceb_command()
+        self.config_dir = config_dir or None
         self.available = _schema(MEDIA_KEYS) is not None and _schema(CUSTOM) is not None
 
     # -------------------------------------------------------------- settings objects
@@ -75,24 +86,59 @@ class Shortcuts:
     # -------------------------------------------------------------- reading
 
     def command_for(self, profile: str) -> str:
-        return " ".join(shlex.quote(a) for a in (self.command, "apply", profile))
+        if not self.command:
+            raise ShortcutError(NOT_FOUND)
+        argv = [self.command] + (["--config-dir", self.config_dir] if self.config_dir else [])
+        return " ".join(shlex.quote(a) for a in argv + ["apply", "--", profile])
 
     @staticmethod
-    def profile_of(command: str) -> str | None:
-        """The profile a custom shortcut's command applies, if it is a CEB shortcut."""
+    def parse(command: str) -> tuple[str | None, str] | None:
+        """(config dir or None, profile) of a CEB shortcut's command, or None if it is not one.
+        Accepts `ceb [--config-dir DIR] apply [--] NAME` with nothing else."""
         try:
             ok, argv = GLib.shell_parse_argv(command)
         except GLib.Error:
             return None
-        if ok and len(argv) == 3 and os.path.basename(argv[0]) == "ceb" and argv[1] == "apply":
-            return argv[2]
-        return None
+        if not ok or not argv or os.path.basename(argv[0]) != "ceb":
+            return None
+        rest, config_dir = list(argv[1:]), None
+        if rest[:1] == ["--config-dir"] and len(rest) >= 2:
+            config_dir, rest = rest[1], rest[2:]
+        elif rest and rest[0].startswith("--config-dir="):
+            config_dir, rest = rest[0].split("=", 1)[1], rest[1:]
+        if rest[:1] != ["apply"]:
+            return None
+        rest = rest[1:]
+        if rest[:1] == ["--"]:
+            rest = rest[1:]
+        elif rest and rest[0].startswith("-"):
+            return None  # an option, not a name (the old form had no "--")
+        if len(rest) != 1:
+            return None
+        return (config_dir or None), rest[0]
+
+    @classmethod
+    def profile_of(cls, command: str) -> str | None:
+        """The profile a custom shortcut's command applies, if it is a CEB shortcut (any folder)."""
+        parsed = cls.parse(command)
+        return parsed[1] if parsed else None
+
+    def _mine(self, command: str) -> str | None:
+        """The profile of a shortcut for this object's config folder, or None."""
+        parsed = self.parse(command)
+        if parsed is None:
+            return None
+        folder, name = parsed
+        same = (folder is None and self.config_dir is None) or (
+            folder is not None and self.config_dir is not None
+            and os.path.abspath(folder) == os.path.abspath(self.config_dir))
+        return name if same else None
 
     def _ceb_entries(self) -> dict[str, tuple[str, Gio.Settings]]:
         out = {}
         for path in self._list():
             entry = self._entry(path)
-            name = self.profile_of(entry.get_string("command"))
+            name = self._mine(entry.get_string("command"))
             if name is not None and name not in out:
                 out[name] = (path, entry)
         return out
@@ -117,13 +163,14 @@ class Shortcuts:
             if found:
                 self._remove(found[0], found[1])
             return
+        command = self.command_for(profile)  # raises before anything is written
         if found:
             path, entry = found
         else:
             path = self._free_path()
             entry = self._entry(path)
         entry.set_string("name", NAME_PREFIX + profile)
-        entry.set_string("command", self.command_for(profile))
+        entry.set_string("command", command)
         entry.set_string("binding", accel)
         if not found:
             media = self._settings(MEDIA_KEYS)
@@ -134,8 +181,9 @@ class Shortcuts:
         found = self._ceb_entries().get(old)
         if found:
             path, entry = found
+            command = self.command_for(new)
             entry.set_string("name", NAME_PREFIX + new)
-            entry.set_string("command", self.command_for(new))
+            entry.set_string("command", command)
             Gio.Settings.sync()
 
     def _remove(self, path: str, entry: Gio.Settings) -> None:
@@ -160,7 +208,7 @@ class Shortcuts:
         same = same or (lambda a, b: a.lower() == b.lower())
         for path in self._list():
             entry = self._entry(path)
-            if self.profile_of(entry.get_string("command")) == profile:
+            if self._mine(entry.get_string("command")) == profile:
                 continue
             if entry.get_string("binding") and same(entry.get_string("binding"), accel):
                 return f"the custom shortcut “{entry.get_string('name')}”"
@@ -180,3 +228,17 @@ class Shortcuts:
                 if any(v and same(v, accel) for v in values):
                     return f"GNOME's “{schema.get_key(key).get_summary() or key}”"
         return None
+
+
+def delete_profile(ceb, shortcuts: "Shortcuts | None", name: str) -> str | None:
+    """Delete a profile and its keyboard shortcut (the window and `ceb delete` both use this).
+    Raises what Ceb.delete_profile raises; nothing is touched then. Returns why the shortcut could
+    not be removed, or None. Other custom shortcuts are never touched."""
+    ceb.delete_profile(name)
+    if shortcuts is None or not shortcuts.available:
+        return None
+    try:
+        shortcuts.set(name, None)
+    except (ShortcutError, GLib.Error) as e:
+        return f"its keyboard shortcut could not be removed: {e}"
+    return None
