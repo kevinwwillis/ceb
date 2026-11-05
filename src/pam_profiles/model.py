@@ -245,6 +245,8 @@ class Profile:
     @classmethod
     def from_json(cls, d: dict) -> "Profile":
         audio = d.get("audio") or {}
+        if not isinstance(d["name"], str):
+            raise TypeError(f"profile name {d['name']!r} is not a string")
         return cls(d["name"],
                    DisplayLayout.from_json(d["displays"]) if d.get("displays") else None,
                    AudioRef.from_json(audio.get("output")), AudioRef.from_json(audio.get("input")))

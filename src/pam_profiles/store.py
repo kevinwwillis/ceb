@@ -5,15 +5,22 @@ Files, in $XDG_CONFIG_HOME/pam/ (default ~/.config/pam/):
   known.json     {"version": 1, "screens": [KnownScreen...], "audio": {"outputs": [...], "inputs": [...]}}
 
 Writes go to a temporary file and are renamed into place, under a lock, so the GUI and a keyboard
-shortcut running at the same moment cannot corrupt or lose each other's changes. A file that cannot
-be parsed is reported and never overwritten.
+shortcut running at the same moment cannot corrupt or lose each other's changes. If a file is a
+symlink (dotfiles kept in a repo), the write goes to the file it points to and the link stays. A file
+that cannot be parsed, or holds values of the wrong type, is reported and never overwritten.
+
+`last_seen` in known.json is kept to LAST_SEEN_RESOLUTION_S: seeing the same screens again does not
+rewrite the file unless something else changed or the stored time is older than that, so a keyboard
+shortcut does not write the history on every press.
 """
 from __future__ import annotations
 
 import contextlib
+import errno
 import fcntl
 import json
 import os
+import stat
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -22,6 +29,7 @@ from pathlib import Path
 from .model import AudioDevice, AudioState, ConnectedMonitor, DisplayState, Identity, ModeSpec, Profile, ScreenId
 
 SCHEMA_VERSION = 1
+LAST_SEEN_RESOLUTION_S = 3600  # known.json is not rewritten just to move last_seen by less than this
 
 
 class StoreError(Exception):
@@ -30,6 +38,38 @@ class StoreError(Exception):
 
 def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _age_s(earlier: str, later: str) -> float | None:
+    """Seconds from `earlier` to `later` (ISO times), or None if either cannot be read."""
+    try:
+        return (datetime.fromisoformat(later) - datetime.fromisoformat(earlier)).total_seconds()
+    except (TypeError, ValueError):
+        return None
+
+
+def _seen_again(old_last_seen: str, when: str) -> str:
+    """The last_seen to store when an entry is seen again with nothing else changed."""
+    age = _age_s(old_last_seen, when)
+    return old_last_seen if age is not None and 0 <= age < LAST_SEEN_RESOLUTION_S else when
+
+
+def open_lock_file(path: str | os.PathLike):
+    """Open (creating if needed) a lock file safely: never follows a symlink, never truncates, and
+    refuses a file owned by another user. Returns a file object; raises StoreError with a clear
+    message otherwise."""
+    flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise StoreError(f"lock file {path} is a symlink; PAM will not use it (remove it)") from e
+        raise StoreError(f"could not open the lock file {path}: {e.strerror or e}") from e
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+        os.close(fd)
+        raise StoreError(f"lock file {path} is not a regular file owned by you; PAM will not use it")
+    return os.fdopen(fd, "r+b")
 
 
 def default_config_dir() -> Path:
@@ -87,10 +127,11 @@ class KnownScreen:
 
     @classmethod
     def from_json(cls, d: dict) -> "KnownScreen":
-        return cls(ScreenId.from_json(d), d.get("display_name", ""),
-                   [KnownMode.from_json(m) for m in d.get("modes", [])], bool(d.get("is_builtin", False)),
-                   d.get("last_connector", ""), d.get("last_gpu"), d.get("first_seen", ""),
-                   d.get("last_seen", ""))
+        last_gpu = d.get("last_gpu")
+        return cls(ScreenId.from_json(d), _str(d, "display_name"),
+                   [KnownMode.from_json(m) for m in _list(d, "modes")], bool(d.get("is_builtin", False)),
+                   _str(d, "last_connector"), None if last_gpu is None else _str(d, "last_gpu"),
+                   _str(d, "first_seen"), _str(d, "last_seen"))
 
 
 @dataclass
@@ -106,7 +147,10 @@ class KnownAudio:
 
     @classmethod
     def from_json(cls, d: dict) -> "KnownAudio":
-        return cls(d["name"], d.get("description", ""), d.get("first_seen", ""), d.get("last_seen", ""))
+        name = d["name"]
+        if not isinstance(name, str):
+            raise TypeError(f"audio device name {name!r} is not a string")
+        return cls(name, _str(d, "description"), _str(d, "first_seen"), _str(d, "last_seen"))
 
 
 @dataclass
@@ -129,9 +173,11 @@ class Known:
     @classmethod
     def from_json(cls, d: dict) -> "Known":
         audio = d.get("audio") or {}
-        return cls([KnownScreen.from_json(s) for s in d.get("screens", [])],
-                   [KnownAudio.from_json(a) for a in audio.get("outputs", [])],
-                   [KnownAudio.from_json(a) for a in audio.get("inputs", [])])
+        if not isinstance(audio, dict):
+            raise TypeError("'audio' is not an object")
+        return cls([KnownScreen.from_json(s) for s in _list(d, "screens")],
+                   [KnownAudio.from_json(a) for a in _list(audio, "outputs")],
+                   [KnownAudio.from_json(a) for a in _list(audio, "inputs")])
 
     # -- merging what is connected now
 
@@ -155,7 +201,7 @@ class Known:
         entry.display_name, entry.is_builtin = m.display_name, m.is_builtin
         entry.modes = modes or entry.modes
         entry.last_connector, entry.last_gpu = m.connector, m.gpu
-        entry.last_seen = when
+        entry.last_seen = when if entry.to_json() != before else _seen_again(entry.last_seen, when)
         return entry.to_json() != before
 
     def observe_audio(self, state: AudioState, when: str | None = None) -> bool:
@@ -173,9 +219,31 @@ def _merge_audio(known: list[KnownAudio], present: list[AudioDevice], when: str)
             known.append(KnownAudio(dev.name, dev.description, when, when))
             changed = True
         else:
-            changed |= entry.description != dev.description or entry.last_seen != when
-            entry.description, entry.last_seen = dev.description or entry.description, when
+            description = dev.description or entry.description
+            if description != entry.description:
+                entry.description, entry.last_seen, changed = description, when, True
+            else:
+                last_seen = _seen_again(entry.last_seen, when)
+                changed |= last_seen != entry.last_seen
+                entry.last_seen = last_seen
     return changed
+
+
+def _str(d: dict, key: str) -> str:
+    value = d.get(key, "")
+    if not isinstance(value, str):
+        raise TypeError(f"{key!r} is {value!r}, not a string")
+    return value
+
+
+def _list(d: dict, key: str) -> list:
+    value = d.get(key, [])
+    if not isinstance(value, list):
+        raise TypeError(f"{key!r} is not a list")
+    return value
+
+
+_INVALID = (KeyError, TypeError, ValueError, AttributeError)  # what a hand-edited file can raise
 
 
 class Store:
@@ -193,8 +261,11 @@ class Store:
     @contextlib.contextmanager
     def locked(self):
         """Hold the store lock for a read-modify-write."""
-        self.dir.mkdir(parents=True, exist_ok=True)
-        with open(self.dir / ".lock", "w") as handle:
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise StoreError(f"could not create {self.dir}: {e.strerror or e}") from e
+        with open_lock_file(self.dir / ".lock") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             try:
                 yield
@@ -215,20 +286,34 @@ class Store:
         if not isinstance(data, dict):
             raise StoreError(f"{path} does not hold a JSON object; PAM will not overwrite it")
         version = data.get("version", SCHEMA_VERSION)
+        if not isinstance(version, int) or isinstance(version, bool):
+            raise StoreError(f"{path} has version {version!r}, not a number; PAM will not overwrite it")
         if version > SCHEMA_VERSION:
             raise StoreError(f"{path} was written by a newer PAM (schema {version}); PAM will not overwrite it")
         return data
 
     def _write(self, path: Path, data: dict) -> None:
+        """Atomic write. A symlinked file is written through: the temporary file goes next to the
+        link's target and replaces the target, so the link stays a link. OSError is raised as
+        StoreError."""
+        try:
+            self._write_atomic(path, data)
+        except OSError as e:
+            raise StoreError(f"could not write {path}: {e.strerror or e}") from e
+
+    def _write_atomic(self, path: Path, data: dict) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=self.dir)
+        target = Path(os.path.realpath(path)) if path.is_symlink() else path
+        fd, tmp = tempfile.mkstemp(prefix=target.name + ".", suffix=".tmp", dir=target.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
                 f.write("\n")
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp, path)
+            with contextlib.suppress(OSError):  # keep the old file's permissions (e.g. 0644)
+                os.chmod(tmp, stat.S_IMODE(os.stat(target).st_mode))
+            os.replace(tmp, target)
         except BaseException:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(tmp)
@@ -241,8 +326,8 @@ class Store:
         if data is None:
             return []
         try:
-            return [Profile.from_json(p) for p in data.get("profiles", [])]
-        except (KeyError, TypeError, ValueError) as e:
+            return [Profile.from_json(p) for p in _list(data, "profiles")]
+        except _INVALID as e:
             raise StoreError(f"{self.profiles_path} has an invalid profile ({e!r}); PAM will not overwrite it") from e
 
     def save_profiles(self, profiles: list[Profile]) -> None:
@@ -257,7 +342,7 @@ class Store:
             return Known()
         try:
             return Known.from_json(data)
-        except (KeyError, TypeError, ValueError) as e:
+        except _INVALID as e:
             raise StoreError(f"{self.known_path} has an invalid entry ({e!r}); PAM will not overwrite it") from e
 
     def save_known(self, known: Known) -> None:
