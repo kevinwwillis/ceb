@@ -5,15 +5,17 @@ from pam_profiles import cli
 class Notifier:
     def __init__(self):
         self.sent = []
+        self.critical = []
 
-    def __call__(self, title, body, **kw):
+    def __call__(self, title, body, *, critical=True):
         self.sent.append((title, body))
+        self.critical.append(critical)
         return True
 
 
-def run(pam, *argv):
-    n = Notifier()
-    return cli.main(list(argv), pam=pam, notifier=n), n.sent
+def run(pam, *argv, notifier=None, on_terminal=True):
+    n = notifier or Notifier()
+    return cli.main(list(argv), pam=pam, notifier=n, on_terminal=on_terminal), n.sent
 
 
 def test_apply_success_is_silent(make_pam):
@@ -115,3 +117,73 @@ def test_show_and_json(make_pam, capsys):
     assert run(pam, "list", "--json")[0] == 0
     data = json.loads(capsys.readouterr().out)
     assert [s["twin"] for s in data["connected_screens"] if s["vendor"] == "LEN"] == [0, 1]
+
+
+# ------------------------------------------------------------ review fixes
+
+
+def test_partial_success_is_normal_urgency_failure_is_critical(make_pam):
+    pam = make_pam(desk(1))
+    run(pam, "save-current", "desk")
+    pam.audio.state.outputs = [HDMI_OUT]
+    n = Notifier()
+    assert run(pam, "apply", "desk", "--allow-missing", notifier=n)[0] == 3
+    assert run(pam, "apply", "desk", notifier=n)[0] == 1
+    assert n.critical == [False, True]
+
+
+def test_dry_run_unexpected_error_only_prints(make_pam, capsys):
+    pam = make_pam(desk(1))
+    run(pam, "save-current", "desk")
+
+    def boom():
+        raise RuntimeError("something odd")
+    pam.display.get_state = boom
+    code, sent = run(pam, "apply", "desk", "--dry-run")
+    assert code == 1 and sent == []
+    assert "something odd" in capsys.readouterr().err
+
+
+def test_usage_error_from_a_shortcut_notifies(make_pam, capsys):
+    pam = make_pam(desk(1))
+    code, sent = run(pam, "apply", on_terminal=False)
+    assert code == 2 and len(sent) == 1 and "name" in sent[0][1]
+    code, sent = run(pam, "aply", "desk", on_terminal=False)
+    assert code == 2 and "aply" in sent[0][1]
+
+
+def test_usage_error_on_a_terminal_only_prints(make_pam, capsys):
+    code, sent = run(make_pam(desk(1)), "apply", on_terminal=True)
+    assert code == 2 and sent == []
+    assert "usage:" in capsys.readouterr().err
+    assert run(make_pam(desk(1)), "apply", "--dry-run", on_terminal=False) == (2, [])
+
+
+def test_list_and_save_without_mutter_say_so_cleanly(make_pam, capsys):
+    from pam_profiles.mutter import DisplayError
+    pam = make_pam(DisplayError("org.gnome.Mutter.DisplayConfig was not provided by any .service files"))
+    for argv in (["list"], ["save-current", "desk"]):
+        capsys.readouterr()
+        assert run(pam, *argv) == (1, [])
+        err = capsys.readouterr().err
+        assert "could not read the screens" in err and "Traceback" not in err
+
+
+def test_list_with_corrupt_history_still_lists_screens(make_pam, capsys):
+    pam = make_pam(desk(1))
+    pam.store.dir.mkdir(parents=True)
+    pam.store.known_path.write_text("{broken")
+    assert run(pam, "list")[0] == 1
+    out, err = capsys.readouterr()
+    assert out.count("connected      HDMI-") == 3
+    assert "not valid JSON" in err and "Traceback" not in err
+    assert pam.store.known_path.read_text() == "{broken"
+
+
+def test_list_with_corrupt_profiles_still_lists_screens(make_pam, capsys):
+    pam = make_pam(desk(1))
+    pam.store.dir.mkdir(parents=True)
+    pam.store.profiles_path.write_text("[]")
+    assert run(pam, "list")[0] == 1
+    out, err = capsys.readouterr()
+    assert "connected      HDMI-1" in out and "does not hold a JSON object" in err

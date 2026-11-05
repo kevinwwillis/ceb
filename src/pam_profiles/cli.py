@@ -3,8 +3,12 @@
 `pam apply <name>` is what keyboard shortcuts run. Every failure of `apply` (and any unexpected error)
 is shown as a desktop notification as well as printed, because a shortcut has no terminal.
 
-Exit codes: 0 done; 1 failed or refused (nothing changed, or an error part-way); 3 applied with
---allow-missing but something was skipped.
+Exit codes: 0 done; 1 failed or refused (nothing changed, or an error part-way); 2 wrong command
+line; 3 applied with --allow-missing but something was skipped.
+
+Notifications: failures of `apply` are notified at critical urgency, an `--allow-missing` partial
+success (exit 3) at normal urgency. A wrong command line is notified when stderr is not a terminal
+(a keyboard shortcut). `--dry-run` and `--no-notify` only print.
 """
 from __future__ import annotations
 
@@ -14,17 +18,33 @@ import sys
 import traceback
 
 from . import __version__
+from .audio import AudioError
 from .core import ApplyResult, Pam, PamError
 from .model import Profile
+from .mutter import DisplayError
 from .notify import notify as desktop_notify
 from .planner import describe_screen
-from .store import Store, StoreError
+from .store import Known, Store, StoreError
 
-EXIT_OK, EXIT_FAILED, EXIT_PARTIAL = 0, 1, 3
+EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_PARTIAL = 0, 1, 2, 3
+
+
+class UsageError(Exception):
+    def __init__(self, parser: argparse.ArgumentParser, message: str):
+        super().__init__(message)
+        self.parser = parser
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse prints and exits on a bad command line; raise instead so main() can also notify
+    (a keyboard shortcut has no terminal to print to)."""
+
+    def error(self, message):
+        raise UsageError(self, message)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="pam", description="Display and audio profiles for GNOME.")
+    ap = _Parser(prog="pam", description="Display and audio profiles for GNOME.")
     ap.add_argument("--version", action="version", version=f"pam {__version__}")
     ap.add_argument("--config-dir", metavar="DIR",
                     help="where profiles and history are kept (default $XDG_CONFIG_HOME/pam)")
@@ -55,25 +75,39 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def main(argv=None, *, pam: Pam | None = None, notifier=desktop_notify) -> int:
-    opts = build_parser().parse_args(argv)
+def main(argv=None, *, pam: Pam | None = None, notifier=desktop_notify, on_terminal=None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    try:
+        opts = build_parser().parse_args(args)
+    except UsageError as e:
+        return _usage_error(e, args, notifier, on_terminal)
     notify_failures = opts.command == "apply" and not opts.no_notify and not opts.dry_run
+    sink = notifier if notify_failures else None
     try:
         pam = pam or Pam(store=Store(opts.config_dir))
         handler = {"list": cmd_list, "show": cmd_show, "save-current": cmd_save,
                    "apply": cmd_apply, "delete": cmd_delete}[opts.command]
-        return handler(pam, opts, notifier if notify_failures else None)
+        return handler(pam, opts, sink)
     except (PamError, StoreError) as e:
-        return _fail(f"pam {opts.command} failed", str(e), notifier if notify_failures else None)
+        return _fail(f"pam {opts.command} failed", str(e), sink)
+    except DisplayError as e:
+        return _fail(f"pam {opts.command} failed", f"could not read the screens: {e}", sink)
+    except AudioError as e:
+        return _fail(f"pam {opts.command} failed", str(e), sink)
     except Exception as e:  # anything unexpected: still tell the user, with the type
         traceback.print_exc()
-        title = f"pam {opts.command} failed"
-        body = f"unexpected error: {type(e).__name__}: {e}"
-        if opts.command == "apply" and not opts.no_notify:
-            notifier(title, body)
-        else:
-            print(f"pam: {title}: {body}", file=sys.stderr)
-        return EXIT_FAILED
+        return _fail(f"pam {opts.command} failed", f"unexpected error: {type(e).__name__}: {e}", sink)
+
+
+def _usage_error(e: UsageError, args: list[str], notifier, on_terminal) -> int:
+    e.parser.print_usage(sys.stderr)
+    title, body = "pam: wrong command", f"{e} (command: pam {' '.join(args)})".rstrip()
+    terminal = sys.stderr.isatty() if on_terminal is None else on_terminal
+    if terminal or "--no-notify" in args or "--dry-run" in args:
+        print(f"pam: {title}: {body}", file=sys.stderr)
+    else:
+        notifier(title, body)  # also prints to stderr
+    return EXIT_USAGE
 
 
 def _fail(title: str, body: str, notifier) -> int:
@@ -88,9 +122,25 @@ def _fail(title: str, body: str, notifier) -> int:
 
 
 def cmd_list(pam: Pam, opts, _notifier) -> int:
-    profiles = pam.profiles()
+    """Lists everything it can. An unreadable profiles.json or known.json is reported (exit 1) but
+    does not hide the rest; without a readable history, the connected screens are still shown."""
+    file_errors = []
+    try:
+        profiles = pam.profiles()
+    except StoreError as e:
+        profiles, file_errors = [], [str(e)]
     display_state, audio_state, audio_errors = pam.current()
-    known = pam.known()
+    if pam.last_history_error:
+        file_errors.append(pam.last_history_error)
+    try:
+        known = pam.known()
+    except StoreError as e:
+        if str(e) not in " ".join(file_errors):
+            file_errors.append(str(e))
+        known = Known()
+        known.observe_display(display_state)
+        if audio_state is not None:
+            known.observe_audio(audio_state)
     connected = {m.screen_id: m for m in display_state.monitors}
     if opts.json:
         print(json.dumps({
@@ -102,8 +152,10 @@ def cmd_list(pam: Pam, opts, _notifier) -> int:
                 "outputs": [d.name for d in audio_state.outputs],
                 "inputs": [d.name for d in audio_state.inputs],
                 "default_output": audio_state.default_output, "default_input": audio_state.default_input},
-            "errors": audio_errors}, indent=2))
-        return EXIT_OK
+            "errors": audio_errors + file_errors}, indent=2))
+        for e in file_errors:
+            print(f"pam: {e}", file=sys.stderr)
+        return EXIT_FAILED if file_errors else EXIT_OK
 
     print("Profiles:")
     if not profiles:
@@ -132,7 +184,9 @@ def cmd_list(pam: Pam, opts, _notifier) -> int:
             print(f"  {mark}  {a.description or a.name}  [{a.name}]")
     for e in audio_errors:
         print(f"\npam: audio: {e}", file=sys.stderr)
-    return EXIT_OK
+    for e in file_errors:
+        print(f"\npam: {e}", file=sys.stderr)
+    return EXIT_FAILED if file_errors else EXIT_OK
 
 
 def _profile_summary(p: Profile) -> str:
@@ -156,7 +210,11 @@ def cmd_show(pam: Pam, opts, _notifier) -> int:
         return EXIT_OK
     print(f"Profile {p.name}")
     if p.displays:
-        known = pam.known()
+        try:
+            known = pam.known()
+        except StoreError as e:
+            print(f"pam: {e}", file=sys.stderr)
+            known = Known()
         for lm in p.displays.logical_monitors:
             for s in lm.screens:
                 twins = len(known.twins_of(s.screen.identity))
@@ -178,6 +236,8 @@ def cmd_show(pam: Pam, opts, _notifier) -> int:
 def cmd_save(pam: Pam, opts, _notifier) -> int:
     p = pam.save_current(opts.name, overwrite=opts.force, include_audio=not opts.no_audio)
     print(f"saved profile {p.name}: {_profile_summary(p)}")
+    if pam.last_history_error:
+        print(f"pam: {pam.last_history_error}", file=sys.stderr)
     return EXIT_OK
 
 
@@ -211,7 +271,8 @@ def cmd_apply(pam: Pam, opts, notifier) -> int:
         if result.problems and not opts.allow_missing and not blocked:
             body += ". Use --allow-missing to apply the rest."
     if notifier:
-        notifier(title, body)  # also prints to stderr
+        # Partial success is information, not an alarm: normal urgency.
+        notifier(title, body, critical=code != EXIT_PARTIAL)  # also prints to stderr
     else:
         print(f"pam: {title}: {body}", file=sys.stderr)
     return code
