@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ceb-profiles"
 version = "0.1.0"
-description = "Display and audio profiles for GNOME: screens on/off, positions, primary screen, default audio output and input."
+description = "CEB (Combined Environment Bundles): display and audio profiles for GNOME: screens on/off, positions, primary screen, default audio output and input."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"

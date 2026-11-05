@@ -1,4 +1,4 @@
-"""CEB core: display and audio profiles for GNOME.
+"""CEB (Combined Environment Bundles) core: display and audio profiles for GNOME.
 
 The GUI and the CLI both use :class:`ceb_profiles.core.Ceb`.
 """

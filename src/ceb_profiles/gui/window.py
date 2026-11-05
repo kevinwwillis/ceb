@@ -320,7 +320,7 @@ class CebWindow(Adw.ApplicationWindow):
             problems.append("GNOME's shortcut settings are not installed; keyboard shortcuts are off")
         self._show_problems(problems)
         notice = getattr(self.ceb.store, "migration_notice", None)
-        if notice:  # the PAM-era files were just copied over; said once (docs/behavior.md, Files)
+        if notice:  # the PAM-era files were just copied over; said once (docs/behavior.md, "Renamed from PAM")
             self.ceb.store.migration_notice = None
             GLib.idle_add(lambda: self.error("Settings Copied from PAM", notice) and False)
         names = [p.name for p in self.profiles]
@@ -806,7 +806,7 @@ class CebWindow(Adw.ApplicationWindow):
         about = Adw.AboutDialog(application_name="CEB", application_icon=self.get_application().get_application_id(),
                                 developer_name="Kevin Willis", version=_version(),
                                 license_type=Gtk.License.MIT_X11,
-                                comments="Display and audio profiles for GNOME")
+                                comments="Combined Environment Bundles: display and audio profiles for GNOME. A profile sets which screens are on, where they are, the primary screen, and the default audio output and input; switch with one key.")
         about.present(self)
 
     # ================================================================ apply

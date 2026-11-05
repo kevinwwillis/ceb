@@ -1,5 +1,9 @@
 # Design
 
+The app was called PAM when these designs were made; it was renamed CEB on 2026-11-05. The mockup
+files in `mockup-round1/` (`index.html`, `pam.js`, `picked-A.jpg`) are kept as they were shown, so they
+still say PAM.
+
 Kevin picked **option A, the Settings-style sidebar**, on 2026-11-05 15:50 ET (aqua 153e308b938f), from
 mockup round 1 (`mockup-round1/index.html`, the first window on the page; screenshot `picked-A.jpg`).
 

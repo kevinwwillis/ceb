@@ -1,4 +1,4 @@
-# CEB
+# CEB — Combined Environment Bundles
 
 Display and audio profiles for GNOME (Wayland and X11). A profile says which screens are on, where
 they are, which one is primary, and the default audio output and input. CEB remembers every screen
@@ -9,6 +9,11 @@ profiles keep working when a multi-GPU machine renumbers its ports between boots
 monitors are told apart by port order. Details: [docs/behavior.md](docs/behavior.md).
 
 Status: core library, command-line tool and a first GTK 4 window.
+
+CEB was called PAM until 2026-11-05; it was renamed because PAM already means Pluggable
+Authentication Modules on Linux. The first time CEB runs, it copies its files from
+`~/.config/pam/` to `~/.config/ceb/`, and the window points keyboard shortcuts made by PAM at
+`ceb apply` (details in [docs/behavior.md](docs/behavior.md#renamed-from-pam)).
 
 ## Install (development)
 
@@ -72,7 +77,8 @@ under "Selected screen", so it can be turned off on its own. Main menu > Remembe
 screens and audio devices CEB remembers that are not connected now, each with Forget.
 
 Shortcuts are GNOME custom shortcuts (Settings > Keyboard > Custom Shortcuts) that run
-`ceb apply <profile>`; CEB changes only the custom shortcuts whose command is exactly that.
+`ceb apply <profile>`; CEB changes only the custom shortcuts whose command is exactly that (and the
+ones it made while it was called PAM; see [docs/behavior.md](docs/behavior.md#renamed-from-pam)).
 
 The window tests need a display; they run only under GTK's Broadway backend, so they never open a
 window on your desktop:

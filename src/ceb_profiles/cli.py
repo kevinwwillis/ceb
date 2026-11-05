@@ -44,7 +44,7 @@ class _Parser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = _Parser(prog="ceb", description="Display and audio profiles for GNOME.")
+    ap = _Parser(prog="ceb", description="CEB (Combined Environment Bundles): display and audio profiles for GNOME.")
     ap.add_argument("--version", action="version", version=f"ceb {__version__}")
     ap.add_argument("--config-dir", metavar="DIR",
                     help="where profiles and history are kept (default $XDG_CONFIG_HOME/ceb)")

@@ -44,7 +44,7 @@ def _adw_version():
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="ceb-gui", description="CEB: display and audio profiles for GNOME")
+    ap = argparse.ArgumentParser(prog="ceb-gui", description="CEB (Combined Environment Bundles): display and audio profiles for GNOME")
     ap.add_argument("--dry-run", action="store_true",
                     help="Apply only asks GNOME to verify the layout; nothing is changed")
     ap.add_argument("--demo", action="store_true",

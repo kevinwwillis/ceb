@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Name=CEB
-GenericName=Display Profiles
-Comment=Switch screen layouts and audio devices with one key
+GenericName=Display and Audio Profiles
+Comment=Combined Environment Bundles: switch screen layouts and audio devices with one key
 Exec=ceb-gui
 Icon=io.github.kevinwwillis.Ceb
 Terminal=false
