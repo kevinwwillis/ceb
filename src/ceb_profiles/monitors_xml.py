@@ -12,6 +12,7 @@ layout is kept unchanged, so with other screens connected GNOME does what it did
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -23,6 +24,10 @@ from .planner import DisplayPlan
 _TRANSFORMS = {0: ("normal", "no"), 1: ("left", "no"), 2: ("upside_down", "no"), 3: ("right", "no"),
                4: ("normal", "yes"), 5: ("left", "yes"), 6: ("upside_down", "yes"), 7: ("right", "yes")}
 _LAYOUT_MODES = {1: "logical", 2: "physical"}
+_SPEC_TAGS = ("connector", "vendor", "product", "serial")
+# Characters XML 1.0 cannot hold at all; ElementTree writes them unescaped and the file is then
+# unreadable, and Mutter drops every layout in a file it cannot read.
+_XML_ILLEGAL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
 
 
 def default_path() -> Path:
@@ -38,7 +43,7 @@ def _text(parent: ET.Element, tag: str, value: str) -> ET.Element:
 
 def _monitorspec(parent: ET.Element, spec: tuple[str, str, str, str]) -> None:
     ms = ET.SubElement(parent, "monitorspec")
-    for tag, value in zip(("connector", "vendor", "product", "serial"), spec):
+    for tag, value in zip(_SPEC_TAGS, spec):
         _text(ms, tag, value)
 
 
@@ -48,8 +53,9 @@ def configuration_element(plan: DisplayPlan, state: DisplayState) -> ET.Element:
     if plan.problems:
         raise ValueError("the plan has problems; nothing to write")
     conf = ET.Element("configuration")
-    if state.layout_mode in _LAYOUT_MODES:
-        _text(conf, "layoutmode", _LAYOUT_MODES[state.layout_mode])
+    layout_mode = plan.properties.get("layout-mode", state.layout_mode)   # the mode the plan uses
+    if layout_mode in _LAYOUT_MODES:
+        _text(conf, "layoutmode", _LAYOUT_MODES[layout_mode])
     for lm in plan.logical_monitors:
         lel = ET.SubElement(conf, "logicalmonitor")
         _text(lel, "x", str(lm.x))
@@ -75,30 +81,63 @@ def configuration_element(plan: DisplayPlan, state: DisplayState) -> ET.Element:
         disabled = ET.SubElement(conf, "disabled")
         for cm in plan.turned_off:
             _monitorspec(disabled, cm.raw_spec)
+    problems = layout_problems(conf)
+    if problems:
+        raise ValueError("GNOME would reject this layout: " + "; ".join(problems))
     return conf
+
+
+def layout_problems(conf: ET.Element) -> list[str]:
+    """What in a <configuration> Mutter's parser rejects (it then ignores the whole file)."""
+    out = []
+    for lm in conf.findall("logicalmonitor"):
+        for tag in ("x", "y"):
+            try:
+                v = int(lm.findtext(tag) or "")
+            except ValueError:
+                out.append(f"logical monitor {tag} {lm.findtext(tag)!r} is not a whole number")
+                continue
+            if not 0 <= v <= 32767:
+                out.append(f"logical monitor {tag} {v} is outside 0..32767")
+    for ms in conf.iter("monitorspec"):
+        for tag in _SPEC_TAGS:
+            value = ms.findtext(tag) or ""
+            if not value:
+                out.append(f"a screen has an empty {tag}")
+            elif _XML_ILLEGAL.search(value):
+                out.append(f"a screen's {tag} {value!r} holds characters XML cannot store")
+    return out
 
 
 def configuration_key(conf: ET.Element) -> frozenset[tuple[str, ...]]:
     """Every screen a <configuration> names (on or disabled), as Mutter matches it."""
-    return frozenset(tuple((ms.findtext(t) or "") for t in ("connector", "vendor", "product", "serial"))
+    return frozenset(tuple((ms.findtext(t) or "") for t in _SPEC_TAGS)
                      for ms in conf.iter("monitorspec"))
 
 
 def merge(path: str | os.PathLike, conf: ET.Element) -> bool:
     """Put `conf` into the monitors.xml at `path`, replacing any saved layout for the same set of
-    screens and keeping all others. Returns True when the file changed. Written atomically."""
+    screens in its place and keeping all others. Returns True when the file changed. Written
+    atomically."""
     path = Path(path)
     if path.exists():
-        root = ET.parse(path).getroot()
+        try:
+            root = ET.parse(path).getroot()
+        except ET.ParseError as e:
+            raise ValueError(f"{path} cannot be read as XML ({e}); not changing it") from None
         if root.tag != "monitors":
             raise ValueError(f"{path} is not a GNOME monitors.xml (root element <{root.tag}>)")
     else:
         root = ET.Element("monitors", {"version": "2"})
     before = ET.tostring(root)
     key = configuration_key(conf)
-    for old in [c for c in root.findall("configuration") if configuration_key(c) == key]:
-        root.remove(old)
-    root.append(conf)
+    same = [c for c in root.findall("configuration") if configuration_key(c) == key]
+    if same:
+        root.insert(list(root).index(same[0]), conf)   # same position, so re-saving changes nothing
+        for old in same:
+            root.remove(old)
+    else:
+        root.append(conf)
     ET.indent(root, space="  ")
     data = ET.tostring(root, encoding="unicode") + "\n"
     if path.exists() and ET.tostring(ET.fromstring(data)) == before:
@@ -108,6 +147,8 @@ def merge(path: str | os.PathLike, conf: ET.Element) -> bool:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
         os.chmod(tmp, 0o644)
         os.replace(tmp, path)
     except BaseException:

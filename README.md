@@ -148,8 +148,8 @@ ceb --config-dir DIR <command>   # profiles and history in DIR instead of ~/.con
 `ceb login-layout` writes the profile into GNOME's own saved-layout file (`~/.config/monitors.xml`, or
 `--file`) for exactly the set of screens connected now, with every screen the profile does not use
 turned off. GNOME then starts in that layout whenever that same set is connected; with any other
-set it behaves as before. Copy the file to the login screen's settings folder to have the login
-screen use it too. See [docs/behavior.md](docs/behavior.md#gnomes-saved-layout-ceb-login-layout).
+set it behaves as before. Copying its layouts into the system-wide `/etc/xdg/monitors.xml` (as root)
+makes the login screen use it too. See [docs/behavior.md](docs/behavior.md#gnomes-saved-layout-ceb-login-layout).
 
 A profile name may start with "-"; on the command line it then goes after `--`, as with other
 Unix tools: `ceb apply -- -work`.

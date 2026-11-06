@@ -71,3 +71,46 @@ def test_rejects_a_file_that_is_not_monitors_xml(make_ceb, tmp_path):
     f.write_text("<other/>")
     code, _ = run(ceb, "login-layout", "desk", "--file", str(f))
     assert code == 1 and f.read_text() == "<other/>"
+
+
+def test_never_applies_anything(make_ceb, tmp_path):
+    ceb = make_ceb(desk(1))
+    run(ceb, "save-current", "desk")
+    ceb.display.set(desk(2, extra=[TV]))
+    run(ceb, "login-layout", "desk", "--file", str(tmp_path / "monitors.xml"))
+    run(ceb, "login-layout", "desk", "--dry-run")
+    assert ceb.display.calls == []
+
+
+def test_resaving_an_earlier_layout_changes_nothing(make_ceb, tmp_path, capsys):
+    ceb = make_ceb(desk(1))
+    run(ceb, "save-current", "desk")
+    f = tmp_path / "monitors.xml"
+    run(ceb, "login-layout", "desk", "--file", str(f))           # layout A
+    ceb.display.set(desk(2, extra=[TV]))
+    run(ceb, "login-layout", "desk", "--file", str(f))           # layout B, after A
+    before = f.read_bytes()
+    ceb.display.set(desk(1))
+    capsys.readouterr()
+    code, _ = run(ceb, "login-layout", "desk", "--file", str(f))    # A again
+    assert code == 0 and f.read_bytes() == before
+    assert "already saved" in capsys.readouterr().out
+
+
+def test_a_serial_xml_cannot_hold_writes_nothing(make_ceb, tmp_path):
+    ceb = make_ceb(desk(1))
+    run(ceb, "save-current", "desk")
+    bad = ("STK", "S2-TEK TV", "SN\x01", "S2-TEK TV")
+    ceb.display.set(desk(2, extra=[mon("DP-2", bad)]))
+    f = tmp_path / "monitors.xml"
+    code, _ = run(ceb, "login-layout", "desk", "--file", str(f))
+    assert code == 1 and not f.exists()
+
+
+def test_unreadable_file_is_left_alone(make_ceb, tmp_path):
+    ceb = make_ceb(desk(1))
+    run(ceb, "save-current", "desk")
+    f = tmp_path / "monitors.xml"
+    f.write_text("<monitors><configuration>")
+    code, _ = run(ceb, "login-layout", "desk", "--file", str(f))
+    assert code == 1 and f.read_text() == "<monitors><configuration>"

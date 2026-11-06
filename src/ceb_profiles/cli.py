@@ -357,13 +357,17 @@ def cmd_login_layout(ceb: Ceb, opts, _notifier) -> int:
         for p in plan.problems:
             print(f"  - {p.message}", file=sys.stderr)
         return EXIT_FAILED
-    conf = monitors_xml.configuration_element(plan, state)
-    if opts.dry_run:
-        ET.indent(conf, space="  ")
-        print(ET.tostring(conf, encoding="unicode"))
-        return EXIT_OK
     path = opts.file or monitors_xml.default_path()
-    changed = monitors_xml.merge(path, conf)
+    try:
+        conf = monitors_xml.configuration_element(plan, state)
+        if opts.dry_run:
+            ET.indent(conf, space="  ")
+            print(ET.tostring(conf, encoding="unicode"))
+            return EXIT_OK
+        changed = monitors_xml.merge(path, conf)
+    except (ValueError, OSError) as e:
+        print(f"ceb login-layout: not written: {e}", file=sys.stderr)
+        return EXIT_FAILED
     screens = ", ".join(sorted(m.connector for m in state.monitors))
     print(f"{'saved' if changed else 'already saved'}: {profile.name!r} as the layout for {screens} in {path}")
     return EXIT_OK

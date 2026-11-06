@@ -120,11 +120,21 @@ file, `monitors.xml` (default `$XDG_CONFIG_HOME/monitors.xml`, or `--file`).
   offered), nothing is written, the problems are listed, and the command exits 1.
 - Because the key includes the port names, a machine whose ports are renumbered between boots needs
   one layout per numbering. Running `ceb login-layout` at every login adds the numbering of that
-  boot; a numbering never seen before falls back to GNOME's default at the login screen once.
+  boot; on the first boot with a numbering never seen before, the login screen and that login get
+  GNOME's default, and later boots with that numbering get the profile.
+- GNOME also uses a saved layout when screens are plugged in or out while it runs: with that same
+  set connected again, it goes back to the saved layout.
+- A layout GNOME would reject is never written (a position outside 0..32767, an empty screen field,
+  or characters XML cannot hold), because GNOME ignores every layout in a file it cannot read. A
+  file that is not a readable `monitors.xml` is left unchanged and the command exits 1.
 - The file is replaced atomically and only when its content changes. GNOME does not reread it while
   running; it uses it at the next login screen or login.
-- The login screen has its own settings folder (on Ubuntu with GNOME 50,
-  `/var/lib/gdm3/seat0/config/`); copying `monitors.xml` there needs root, which CEB does not do.
+- GNOME also reads a system-wide `monitors.xml` in each `$XDG_CONFIG_DIRS` folder (usually
+  `/etc/xdg/monitors.xml`), at the login screen and at login, and never writes it; for the same
+  set of screens the user's own file wins. To have the login screen use the profile, put the
+  layout in that system file. That needs root, which CEB does not do. (The login screen's own
+  settings folder, on Ubuntu with GNOME 50 `/var/lib/gdm3/seat0/config/`, belongs to a user GDM
+  creates at each start, so a file copied there is harder to keep.)
 
 ## The window: saving, switching and testing
 
