@@ -3,6 +3,7 @@
 Files, in $XDG_CONFIG_HOME/ceb/ (default ~/.config/ceb/):
   profiles.json  {"version": 1, "profiles": [Profile.to_json(), ...]}
   known.json     {"version": 1, "screens": [KnownScreen...], "audio": {"outputs": [...], "inputs": [...]}}
+  settings.json  {"version": 1, "test_seconds": 15}   the window's own settings
 
 Writes go to a temporary file and are renamed into place, under a lock, so the GUI and a keyboard
 shortcut running at the same moment cannot corrupt or lose each other's changes. If a file is a
@@ -262,6 +263,32 @@ def _list(d: dict, key: str) -> list:
 
 _INVALID = (KeyError, TypeError, ValueError, AttributeError)  # what a hand-edited file can raise
 
+# The window's Test: how long a tested profile stays before CEB goes back (one app-wide setting).
+TEST_SECONDS_DEFAULT = 15
+TEST_SECONDS_MIN = 3
+TEST_SECONDS_MAX = 600
+
+
+def clamp_test_seconds(seconds: int) -> int:
+    return max(TEST_SECONDS_MIN, min(TEST_SECONDS_MAX, int(seconds)))
+
+
+@dataclass
+class Settings:
+    """The window's own settings (settings.json). Not in gsettings: CEB keeps what it owns in its
+    config folder, so `--config-dir` and the demo keep them apart as well."""
+    test_seconds: int = TEST_SECONDS_DEFAULT
+
+    def to_json(self) -> dict:
+        return {"version": SCHEMA_VERSION, "test_seconds": self.test_seconds}
+
+    @classmethod
+    def from_json(cls, d: dict) -> "Settings":
+        seconds = d.get("test_seconds", TEST_SECONDS_DEFAULT)
+        if not isinstance(seconds, int) or isinstance(seconds, bool):
+            raise TypeError(f"test_seconds {seconds!r} is not a whole number")
+        return cls(clamp_test_seconds(seconds))
+
 
 class Store:
     def __init__(self, config_dir: str | os.PathLike | None = None):
@@ -274,6 +301,10 @@ class Store:
     @property
     def known_path(self) -> Path:
         return self.dir / "known.json"
+
+    @property
+    def settings_path(self) -> Path:
+        return self.dir / "settings.json"
 
     @contextlib.contextmanager
     def locked(self):
@@ -364,3 +395,20 @@ class Store:
 
     def save_known(self, known: Known) -> None:
         self._write(self.known_path, known.to_json())
+
+    # -- the window's settings
+
+    def load_settings(self) -> Settings:
+        data = self._read(self.settings_path)
+        if data is None:
+            return Settings()
+        try:
+            return Settings.from_json(data)
+        except _INVALID as e:
+            raise StoreError(f"{self.settings_path} has an invalid value ({e}); CEB will not overwrite it") from e
+
+    def save_settings(self, settings: Settings) -> None:
+        """Replace settings.json. A file there that CEB cannot read is never overwritten (StoreError)."""
+        with self.locked():
+            self.load_settings()
+            self._write(self.settings_path, settings.to_json())

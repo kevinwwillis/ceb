@@ -137,8 +137,13 @@ class Ceb:
     # ------------------------------------------------------------ saving
 
     def capture(self, name: str, display_state: DisplayState, audio_state: AudioState | None,
-                include_audio: bool = True) -> Profile:
-        """Build a profile from the given state (not stored)."""
+                include_audio: bool = True, exact: bool = False) -> Profile:
+        """Build a profile from the given state (not stored).
+
+        The default input may be a monitor source ("Monitor of …", what PipeWire makes the default
+        when there is no microphone). `exact=False` (a profile people save) leaves the input
+        unchanged then: a monitor is not a microphone, and the window's Input picker does not offer
+        it. `exact=True` (what to go back to after a test) records it, so it is set again."""
         lms = []
         for lm in display_state.logical_monitors:
             screens = []
@@ -156,8 +161,21 @@ class Ceb:
         profile = Profile(name, DisplayLayout(lms, display_state.layout_mode))
         if include_audio and audio_state is not None:
             profile.audio_output = _ref(audio_state.outputs, audio_state.default_output)
-            profile.audio_input = _ref(audio_state.inputs, audio_state.default_input)
+            if exact:
+                profile.audio_input = _ref(audio_state.sources(), audio_state.default_input)
+            elif not audio_state.default_input_is_monitor():
+                profile.audio_input = _ref(audio_state.inputs, audio_state.default_input)
         return profile
+
+    def live_profile(self, name: str = "before the test", *, include_audio: bool = True) -> Profile:
+        """What is on now (screens, and with include_audio the default output and input exactly,
+        a monitor source too) as a profile that is not stored, so it can be applied again later
+        (the window's Test goes back to it). Raises DisplayError or CebError when the screens
+        cannot be read, and AudioError when include_audio and the audio devices cannot be read
+        (the caller then must not change audio either; see the window's Test)."""
+        display_state = self.display.get_state()
+        audio_state = self.audio.snapshot() if include_audio else None
+        return self.capture(name, display_state, audio_state, include_audio=include_audio, exact=True)
 
     def save_current(self, name: str, *, overwrite: bool = False, include_audio: bool = True) -> Profile:
         name = name.strip()
@@ -256,7 +274,13 @@ class Ceb:
         Screens are applied before audio. A display-audio device (HDMI/DisplayPort) that is missing
         while the profile turns a screen on is waited for after the screens change (up to
         audio_appear_wait_s); if it does not appear it is reported, never replaced."""
-        profile = self.profile(name)
+        return self.apply_profile(self.profile(name), dry_run=dry_run, allow_missing=allow_missing)
+
+    def apply_profile(self, profile: Profile, *, dry_run: bool = False,
+                      allow_missing: bool = False) -> ApplyResult:
+        """apply(), for a profile that is not (or not as it is) in profiles.json: the window's Test
+        (the profile as edited, saved or not) and going back after a test (live_profile())."""
+        name = profile.name
         result = ApplyResult(profile=name, dry_run=dry_run, allow_missing=allow_missing)
         lock = None
         if not dry_run:
@@ -371,7 +395,7 @@ class Ceb:
             except AudioError:
                 state = None
             if state is not None:
-                present = {d.name for d in state.outputs} | {d.name for d in state.inputs}
+                present = {d.name for d in state.outputs} | {d.name for d in state.sources()}
                 if any(ref.name in present for ref in missing):
                     self.observe_best_effort(None, state)
                 missing = {ref for ref in missing if ref.name not in present}
@@ -388,6 +412,7 @@ def _ref(devices, name):
 
 
 _DISPLAY_AUDIO_HINTS = ("hdmi", "displayport")
+MONITOR_SUFFIX = ".monitor"   # PulseAudio/PipeWire name a monitor source "<output>.monitor"
 
 
 def _awaited_audio(profile: Profile, aplan: AudioPlan, dplan: DisplayPlan | None,
@@ -404,6 +429,10 @@ def _awaited_audio(profile: Profile, aplan: AudioPlan, dplan: DisplayPlan | None
     for kind, ref in (("output", profile.audio_output), ("input", profile.audio_input)):
         if ref is not None and f"missing_{kind}" in kinds:
             text = f"{ref.name} {ref.description}".lower()
+            # A monitor source ("<output>.monitor") comes and goes with its output: it is waited for
+            # when that output is display audio, judged by the output's own name only.
+            if ref.name.endswith(MONITOR_SUFFIX):
+                text = ref.name[:-len(MONITOR_SUFFIX)].lower()
             if any(h in text for h in _DISPLAY_AUDIO_HINTS):
                 out.append((kind, ref))
     return out

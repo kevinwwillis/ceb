@@ -112,6 +112,11 @@ UNITEK_IN = AudioDevice("alsa_input.usb-C-Media_Electronics_Inc._USB_Audio_Devic
                         "Audio Adapter (Unitek Y-247A) Mono")
 
 
+def monitors_of(outputs):
+    """The "Monitor of …" source PipeWire/PulseAudio makes for each output."""
+    return [AudioDevice(o.name + ".monitor", "Monitor of " + o.description) for o in outputs]
+
+
 class FakeAudio:
     def __init__(self, outputs=(UNITEK_OUT, HDMI_OUT), inputs=(WEBCAM_IN, UNITEK_IN),
                  default_output=UNITEK_OUT.name, default_input=WEBCAM_IN.name):
@@ -128,7 +133,7 @@ class FakeAudio:
         if self.down:
             raise AudioError("could not connect to the audio server: connection refused")
         return AudioState(list(self.state.outputs), list(self.state.inputs),
-                          self.state.default_output, self.state.default_input)
+                          self.state.default_output, self.state.default_input, monitors_of(self.state.outputs))
 
     def set_default_output(self, name):
         if not any(d.name == name for d in self.state.outputs):
@@ -137,7 +142,8 @@ class FakeAudio:
         self.state.default_output = name
 
     def set_default_input(self, name):
-        if not any(d.name == name for d in self.state.inputs):
+        # As the real backend: any source, a monitor too.
+        if not any(d.name == name for d in self.state.inputs + monitors_of(self.state.outputs)):
             raise AudioError(f"audio input {name} is not present")
         self.set_calls.append(("input", name))
         self.state.default_input = name

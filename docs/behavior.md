@@ -103,6 +103,55 @@ device not present):
   changed, so `ceb apply` says "only partly applied" and exits 1, or 3 with `--allow-missing`).
   Another device is never used in its place. Any other missing device refuses as above.
 
+## The window: saving, switching and testing
+
+- Editing a profile in the window (dragging or adding screens, turning one off, the primary screen,
+  audio output and input, the keyboard shortcut) never changes the live screens or audio, and
+  nothing is written until Save. The window holds one set of unsaved edits, for the profile shown,
+  in memory, with Undo and Redo, until Save or Discard; opening another profile, making a new one,
+  renaming, or closing the window with unsaved edits asks first (Save, Discard, Cancel). While
+  there are unsaved edits or a test is on screen, CEB asks the session not to log out without
+  asking (a logout inhibit), since a logout would end it. A reload (a screen or audio device plugged in) keeps them, and so does a
+  `profiles.json` that cannot be read at that moment (the window keeps showing the profiles as last
+  read, says so in its banner, and Save reports the problem until it is fixed). A screen read that
+  started before an edit, Save or Discard is not shown; the screens are read again.
+- Save writes the profile only if `profiles.json` still holds the version the edits started from;
+  if it was changed meanwhile, the window asks whether to replace it or discard the edits. Discard
+  always shows the profile as `profiles.json` holds it now. If the profile was deleted outside the
+  window while it had unsaved edits, the edits stay shown and the window asks once: save them as a
+  new profile with that name, or discard them. The shortcut is written to GNOME after the profile;
+  if that fails, the profile stays saved and the shortcut stays an unsaved edit. A profile that
+  holds screens not connected now saves like any other.
+- Only three things change the live screens and audio: "Switch to profile" (the saved profile,
+  exactly what its keyboard shortcut and `ceb apply` do; unsaved edits are not used), the keyboard
+  shortcut, and Test.
+- Test reads what is on now (screens, default output and input) first; if the screens cannot be
+  read, nothing is applied. The default input is recorded exactly, also when it is a monitor source
+  ("Monitor of …", which PipeWire makes the default when there is no microphone), so going back
+  sets it again. A monitor source comes and goes with its output, so the monitor of an HDMI or
+  DisplayPort output is waited for like that output (up to 5 s after the screens change); the
+  monitor of any other output is not. If the audio devices cannot be
+  read, the test changes the screens only, leaves audio alone (it could not set it back), and says
+  so ("Audio not tested"). It then applies the profile as shown, unsaved edits included, in the
+  same way as a switch (verify, then temporary). After the test length it applies what was on
+  before, skipping anything that went away meanwhile (`allow_missing`), unless Keep was pressed. The
+  countdown runs in the window's main loop and needs no click, so it goes back even when the tested
+  layout leaves the window on a screen that is now off.
+- If going back fails, the window keeps what to go back to and the bar offers Retry (and Keep, to
+  stay as it is). Closing the window then asks once: Retry, or keep the current screens and close.
+  Closing the window during a test goes back first, then closes; so does SIGTERM,
+  SIGINT or SIGHUP (logout, `kill`, Ctrl+C), without asking about unsaved edits. "+" (new profile
+  from the current screens) is off during a test, since the screens are the tested ones. A profile
+  switch from a keyboard shortcut during a test is undone when the test goes back. Not covered: if
+  the process is killed outright (SIGKILL, a crash), the tested layout stays until GNOME next
+  reconfigures the screens; and per-monitor properties (HDR, underscan) are not recorded before a
+  test.
+- A profile saved from the current screens (`save-current`, "+") leaves the input unchanged when the
+  default source is a monitor: a monitor is not a microphone, and the Input picker does not offer
+  one.
+- The test length is one setting for all profiles: `settings.json` in the config folder,
+  `{"version": 1, "test_seconds": 15}`, 15 s when there is none, kept between 3 and 600 s.
+
 ## Desktop notifications
 
 `ceb apply` reports every failure through `org.freedesktop.Notifications` (D-Bus, through Gio),
@@ -125,8 +174,8 @@ libpulse) to read and set the default sink and source through pipewire-pulse:
 
 ## Files
 
-`$XDG_CONFIG_HOME/ceb/` (default `~/.config/ceb/`): `profiles.json` and `known.json`, both
-`{"version": 1, ...}`. Writes are atomic and locked. A file CEB cannot parse, one with values of the
+`$XDG_CONFIG_HOME/ceb/` (default `~/.config/ceb/`): `profiles.json`, `known.json` and the window's
+`settings.json`, all `{"version": 1, ...}`. Writes are atomic and locked. A file CEB cannot parse, one with values of the
 wrong type, or one written by a newer CEB, is reported and never overwritten. If either file is a
 symlink, CEB writes to the file it points to and the link stays. If `profiles.json` holds two
 profiles with the same name (only possible by editing it by hand), CEB uses the first one and the

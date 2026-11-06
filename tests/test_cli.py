@@ -246,7 +246,8 @@ def test_refusal_notification_says_how_to_apply_the_rest(make_ceb):
     _code, sent = run(ceb, "apply", "desk")
     body = sent[0][1]
     assert "Use --allow-missing" not in body
-    assert "Apply the Rest" in body and "apply --allow-missing -- desk" in body
+    assert "Switch to profile" in body and "Apply the Rest" in body and "apply --allow-missing -- desk" in body
+    assert "press Apply" not in body
 
 
 class FakeShortcuts:
@@ -279,7 +280,7 @@ def test_delete_reports_a_shortcut_it_could_not_remove(make_ceb, capsys):
 
 def test_delete_with_real_shortcut_code_in_memory(make_ceb):
     pytest = __import__("pytest")
-    gi = pytest.importorskip("gi")
+    pytest.importorskip("gi")
     from gi.repository import Gio
     from ceb_profiles.gui.shortcuts import CUSTOM, Shortcuts
     if Gio.SettingsSchemaSource.get_default().lookup(CUSTOM, True) is None:

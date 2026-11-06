@@ -348,7 +348,8 @@ def cmd_apply(ceb: Ceb, opts, notifier) -> int:
         title = f"Profile {result.profile} not applied" + (" (dry run)" if result.dry_run else "")
         code, body = EXIT_FAILED, "Nothing was changed. " + detail
         if result.problems and not opts.allow_missing and not blocked:
-            body += (". To apply the rest, press Apply in CEB's window and choose Apply the Rest, or run "
+            body += (". To apply the rest, open the profile in CEB's window, press Switch to profile and "
+                     "choose Apply the Rest, or run "
                      f"in a terminal: ceb{_dir_option(ceb)} apply --allow-missing -- {_quote(result.profile)}")
     if notifier:
         # Partial success is information, not an alarm: normal urgency.

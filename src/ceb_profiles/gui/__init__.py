@@ -1,7 +1,7 @@
 """CEB's GTK 4 + libadwaita window. Run with `ceb-gui` or `ceb gui`.
 
   ceb-gui                 the real thing: GNOME's screens, the audio server, GNOME's shortcuts
-  ceb-gui --dry-run       Apply only asks GNOME to check the layout (ApplyMonitorsConfig method 0);
+  ceb-gui --dry-run       Switch and Test only ask GNOME to check the layout (ApplyMonitorsConfig method 0);
                           nothing on screen or in audio changes
   ceb-gui --demo          example screens and audio devices, a throwaway profile store and in-memory
                           shortcuts; touches nothing real (for screenshots and development)
@@ -44,8 +44,9 @@ def version_problem(adw: tuple[int, int, int] | None, have_gi: bool = True) -> s
 
 
 def _have_gi() -> bool:
+    import importlib
     try:
-        import gi  # noqa: F401
+        importlib.import_module("gi")
     except ImportError:
         return False
     return True
@@ -65,7 +66,7 @@ def _adw_version():
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="ceb-gui", description="CEB (Combined Environment Bundles): display and audio profiles for GNOME")
     ap.add_argument("--dry-run", action="store_true",
-                    help="Apply only asks GNOME to verify the layout; nothing is changed")
+                    help="Switch and Test only ask GNOME to verify the layout; nothing is changed")
     ap.add_argument("--demo", action="store_true",
                     help="example screens and audio, throwaway store, in-memory shortcuts; touches nothing real")
     ap.add_argument("--size", help=argparse.SUPPRESS)  # WIDTHxHEIGHT, for screenshots
@@ -125,16 +126,27 @@ def main(argv=None) -> int:
         win.present()
 
     app.connect("activate", activate)
-    if demo_dir:  # end cleanly (and remove the demo folder) when stopped from outside too
-        import signal
+    # Stopped from outside (logout, kill, Ctrl+C): a running test goes back first, a running switch
+    # ends, then the window closes and the program ends (and the demo folder is removed).
+    import signal
 
-        from .._signals import on_signals
-        on_signals((signal.SIGTERM, signal.SIGINT, signal.SIGHUP), lambda _s: app.quit())
+    from .._signals import on_signals
+    on_signals((signal.SIGTERM, signal.SIGINT, signal.SIGHUP), lambda _s: quit_on_signal(app))
     try:
         return app.run([sys.argv[0]])
     finally:
         if demo_dir:
             shutil.rmtree(demo_dir, ignore_errors=True)
+
+
+def quit_on_signal(app) -> None:
+    """Each CEB window goes back from a test and closes (CebWindow.quit_now); the application ends
+    when the last window has closed. With no window open, it ends at once."""
+    windows = [w for w in app.get_windows() if hasattr(w, "quit_now")]
+    if not windows:
+        app.quit()
+    for w in windows:
+        w.quit_now()
 
 
 def _add_icon_path(Gtk) -> None:

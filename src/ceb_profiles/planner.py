@@ -155,7 +155,8 @@ def plan_audio(profile: Profile, state: AudioState | None) -> AudioPlan:
         if output and not any(d.name == output.name for d in state.outputs):
             problems.append(Problem("missing_output", f"audio output {output.describe()} is not present"))
             output = None
-        if input_ and not any(d.name == input_.name for d in state.inputs):
+        # A monitor source counts as present: going back after a test may set one again.
+        if input_ and not any(d.name == input_.name for d in state.sources()):
             problems.append(Problem("missing_input", f"audio input {input_.describe()} is not present"))
             input_ = None
     return AudioPlan(output, input_, problems)
