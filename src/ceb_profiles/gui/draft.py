@@ -98,16 +98,21 @@ class Draft:
 
     # ------------------------------------------------------------ saving
 
-    def save(self, ceb, set_shortcut: Callable[[str, str | None], str | None], *, force: bool = False) -> str | None:
+    def save(self, ceb, set_shortcut: Callable[[str, str | None], str | None], *, force: bool = False,
+             create: bool = False) -> str | None:
         """Write the profile to profiles.json, then the shortcut to GNOME if it changed.
 
         The profile is written only if profiles.json still holds the version this draft started
         from; otherwise core.ProfileChanged is raised and nothing is written (force=True writes it
-        anyway). StoreError and CebError are raised as they come.
+        anyway). create=True: the profile was deleted meanwhile; it is added as a new one, and
+        CebError is raised if a profile with its name exists again. StoreError and CebError are
+        raised as they come.
 
         set_shortcut(name, accel) returns an error message or None. When it fails, the profile is
         saved and the shortcut stays an unsaved edit; the message is returned."""
-        if self.profile_dirty or force:
+        if create:
+            ceb.put_profile(self.profile, overwrite=False)
+        elif self.profile_dirty or force:
             ceb.put_profile(self.profile, expected=None if force else self.saved)
         self.saved = copy.deepcopy(self.profile)
         problem = None

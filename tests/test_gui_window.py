@@ -931,3 +931,233 @@ def test_an_unreadable_settings_file_is_reported_and_kept(tmp_path, app):
         assert ceb.store.settings_path.read_text() == "{oops"
     finally:
         w.destroy()
+
+
+# ------------------------------------------------------------ review of 24ad3c1 (2026-11-05)
+
+
+class StatefulDisplay:
+    """conftest's FakeDisplay whose state follows what is applied with method 1, so going back can
+    be checked against what is "on" (method 2 is refused, as in every fake)."""
+
+    def __init__(self, reply_):
+        from conftest import FakeDisplay
+        self.fake = FakeDisplay(reply_)
+        self.cur = reply_
+        self.down = False
+
+    def __getattr__(self, name):
+        return getattr(self.fake, name)
+
+    def get_state(self):
+        from ceb_profiles.mutter import DisplayError, parse_current_state
+        if self.down:
+            raise DisplayError("mutter gone")
+        return parse_current_state(self.cur)
+
+    def apply(self, serial, method, lms, props):
+        self.fake.apply(serial, method, lms, props)
+        if method == 1:
+            serial0, monitors, _old, p = self.cur
+            specs = {m[0][0]: m[0] for m in monitors}
+            self.cur = (serial0 + 1, monitors,
+                        [(lm.x, lm.y, lm.scale, lm.transform, lm.primary, [specs[m.connector] for m in lm.monitors], {})
+                         for lm in lms], p)
+
+    def live(self):
+        from ceb_profiles.mutter import parse_current_state
+        return sorted((c, lm.x, lm.y, lm.primary) for lm in parse_current_state(self.cur).logical_monitors
+                      for c in lm.connectors)
+
+
+@pytest.fixture
+def real(tmp_path, app):
+    """A window over the real-desk fakes (conftest): a stateful display and FakeAudio, with
+    monitor sources. Not --demo for its data, but demo=True so nothing is watched."""
+    from conftest import FakeAudio, desk
+    display = StatefulDisplay(desk(1))
+    ceb = Ceb(display=display, audio=FakeAudio(), store=Store(tmp_path / "ceb"))
+    ceb._sleep = lambda s: None
+    ceb.save_current("desk")
+    w = CebWindow(app, ceb, Shortcuts(backend=Gio.memory_settings_backend_new(), command="ceb"), demo=True)
+    display.calls.clear()
+    yield w
+    w.destroy()
+
+
+def only_rog(w):
+    for lm in list(w.profile().displays.logical_monitors):
+        sid = lm.screens[0].screen
+        if sid.identity.vendor != "AUS":
+            w.selected = sid
+            w._on_turn_off(None)
+
+
+def run_out(w):
+    w._testing["deadline"] = time.monotonic()
+    assert spin(lambda: w._testing is None and not w._applying)
+
+
+USB_MONITOR = "alsa_output.usb-C-Media_Electronics_Inc._USB_Audio_Device-00.analog-stereo.monitor"
+
+
+def test_go_back_restores_screens_and_audio_as_they_were(real):
+    before = real.ceb.display.live()
+    only_rog(real)
+    real.output_row.set_selected(2)                       # the HDMI output
+    start_test(real, 3)
+    assert real.ceb.display.live() != before and "hdmi" in real.ceb.audio.state.default_output
+    run_out(real)
+    assert real.ceb.display.live() == before
+    assert real.ceb.audio.state.default_output.startswith("alsa_output.usb-C-Media")
+
+
+@pytest.mark.parametrize("profile_input", [0, 1])           # 0: leave the input unchanged; 1: the webcam
+def test_a_monitor_default_source_comes_back_exactly_with_no_error(real, dialogs, profile_input):
+    real.ceb.audio.state.default_input = USB_MONITOR       # PipeWire's default when there is no microphone
+    only_rog(real)
+    real.input_row.set_selected(profile_input)
+    start_test(real, 3)
+    run_out(real)
+    assert real.ceb.audio.state.default_input == USB_MONITOR
+    assert not dialogs, [d.get_heading() for d in dialogs]
+
+
+def test_a_test_that_cannot_read_audio_leaves_audio_alone_and_says_so(real, monkeypatch):
+    toasts = []
+    monkeypatch.setattr(real, "toast", toasts.append)
+    real.output_row.set_selected(2)                       # the profile would change the output
+    real.ceb.audio.down = True                            # but the audio server cannot be read
+    only_rog(real)
+    start_test(real, 3)
+    assert real.ceb.audio.set_calls == []
+    assert any("Audio not tested" in t for t in toasts)
+    real.ceb.audio.down = False
+    run_out(real)
+    assert real.ceb.audio.set_calls == []                 # going back does not touch audio either
+
+
+def test_the_test_length_box_ignores_non_ascii_digits(real):
+    real.test_seconds.set_text("²٣5")                     # superscript two, Arabic-Indic three
+    assert real.test_seconds.get_text() == "5"
+    real.test_seconds.set_text("")
+    real.test_seconds.get_delegate().set_text("²")        # whatever got past the filter
+    assert real.commit_test_seconds() == 15
+    only_rog(real)
+    start_test(real, 4)
+    assert real.test_remaining() == 4
+    run_out(real)
+
+
+def test_a_typed_test_length_is_kept_when_the_window_closes(real):
+    shown(real)
+    real.test_seconds.grab_focus()
+    real.test_seconds.set_text("42")
+    real.close()
+    assert spin(lambda: not real.get_visible())
+    assert real.ceb.store.load_settings().test_seconds == 42
+
+
+def test_unsaved_edits_survive_an_unreadable_profiles_file(real):
+    only_rog(real)
+    path = real.ceb.store.profiles_path
+    good = path.read_text()
+    path.write_text("{oops")
+    real.reload(select=real.current)
+    assert real.dirty() and "profiles.json" in real.banner.get_title()
+    assert rows(real.sidebar_list) == ["desk"]                # still shown as last read
+    assert not real.save()                                   # reported, not lost
+    assert path.read_text() == "{oops"
+    path.write_text(good)
+    real.reload(select="desk")
+    assert real.dirty() and len(real.profile().displays.logical_monitors) == 1
+    assert real.save()
+
+
+def test_a_profile_deleted_outside_while_edited_asks_and_can_be_saved_again(real, dialogs):
+    real.ceb.save_current("second")
+    real.reload(select="desk")
+    only_rog(real)
+    real.ceb.delete_profile("desk")
+    real.reload(select=real.current)
+    assert real.current == "desk" and real.dirty()            # the edits are still shown
+    assert "Deleted Outside" in dialogs[-1].get_heading()
+    n = len(dialogs)
+    real.reload(select=real.current)
+    assert len(dialogs) == n                                  # asked once
+    dialogs[-1].emit("response", "save")
+    stored = real.ceb.profile("desk")
+    assert len(stored.displays.logical_monitors) == 1 and not real.dirty()
+    assert [p.name for p in real.ceb.profiles()] == ["second", "desk"]
+
+
+def test_a_profile_deleted_outside_while_edited_can_be_discarded(real, dialogs):
+    real.ceb.save_current("second")
+    real.reload(select="desk")
+    only_rog(real)
+    real.ceb.delete_profile("desk")
+    real.reload(select=real.current)
+    dialogs[-1].emit("response", "discard")
+    assert real.current == "second" and not real.dirty()
+    assert [p.name for p in real.ceb.profiles()] == ["second"]
+
+
+def test_a_failed_go_back_keeps_what_to_go_back_to_and_offers_retry(real, dialogs):
+    from ceb_profiles.mutter import DisplayError
+    before = real.ceb.display.live()
+    only_rog(real)
+    start_test(real, 30)
+    real.ceb.display.fail_with[0] = DisplayError("refused")   # GNOME refuses the go-back once
+    real.activate_action("win.test-back", None)
+    assert spin(lambda: not real._applying and real._testing is not None)
+    assert real._testing["failed"] and "Go Back" in dialogs[-1].get_heading()
+    assert real.bar_stack.get_visible_child_name() == "testing"
+    assert real.back_button.get_label() == "Retry" and real.lookup_action("test-back").get_enabled()
+    assert "Could not go back" in real.testing_label.get_label()
+    spin(lambda: False, 0.5)
+    assert real._testing is not None                          # no countdown runs out on a failure
+    real.activate_action("win.test-back", None)               # Retry
+    assert spin(lambda: real._testing is None and not real._applying)
+    assert real.ceb.display.live() == before
+
+
+def test_new_profile_is_blocked_during_a_test(real):
+    only_rog(real)
+    start_test(real, 30)
+    assert not real.lookup_action("new-profile").get_enabled()
+    real.activate_action("win.test-back", None)
+    assert spin(lambda: real._testing is None and not real._applying)
+    assert real.lookup_action("new-profile").get_enabled()
+
+
+def test_a_signal_during_a_test_goes_back_then_closes_without_asking(real, dialogs):
+    from ceb_profiles.gui import quit_on_signal
+    shown(real)
+    before = real.ceb.display.live()
+    only_rog(real)                                            # unsaved edits too: no question asked
+    start_test(real, 30)
+    quit_on_signal(real.get_application())                    # what SIGTERM/SIGINT/SIGHUP run
+    assert spin(lambda: not real.get_visible())
+    assert real.ceb.display.live() == before and not dialogs
+
+
+def test_a_screen_read_that_started_before_a_save_is_not_shown(real):
+    stale = real._read_state()                                # a MonitorsChanged read, in its thread
+    only_rog(real)
+    assert real.save()
+    real.MONITORS_SETTLE_MS = real.MONITORS_RETRY_MS = 20
+    real._monitors_read(stale)                                # its result comes back late
+    assert len(real.profile().displays.logical_monitors) == 1 and not real.dirty()
+    assert spin(lambda: real._monitors_pending is None and not real._monitors_reading)   # read again
+    assert len(real.profile().displays.logical_monitors) == 1
+
+
+def test_discard_after_an_outside_change_shows_what_is_stored_now(real):
+    only_rog(real)
+    newer = real.ceb.profile("desk")
+    newer.audio_output = None                                 # changed outside, e.g. save-current --force
+    real.ceb.put_profile(newer)
+    real.reload(select="desk")                                # the edits are kept over a reload
+    real.discard()
+    assert real.profile().audio_output is None and not real.dirty()
+    assert len(real.profile().displays.logical_monitors) == 3

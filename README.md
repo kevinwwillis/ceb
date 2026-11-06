@@ -97,9 +97,10 @@ there are unsaved changes, and holds:
   changes and show the newer one;
 - **Test** with its length in seconds: switches to the profile as shown (unsaved changes included)
   and goes back to the screens and audio you had before after that many seconds, unless you press
-  **Keep**; **Go back now** goes back at once. The length (15 s at first) is one setting for every
-  profile, kept in `settings.json` next to the profiles. Closing the window during a test goes back
-  first;
+  **Keep**; **Go back now** goes back at once, and **Retry** appears if going back failed. The
+  length (15 s at first) is one setting for every profile, kept in `settings.json` next to the
+  profiles. Closing the window, or stopping CEB (logout, `kill`, Ctrl+C), during a test goes back
+  first. If the audio devices cannot be read when a test starts, it tests the screens only;
 - **Switch to profile**: switches the screens and audio to the saved profile, as its keyboard shortcut
   does. Unsaved changes are not used; save them first to switch to them.
 
@@ -179,7 +180,7 @@ state, audio, errors = ceb.current()      # connected screens and audio devices,
 known = ceb.known()                       # every screen and audio device ever seen
 ceb.save_current("desk")
 result = ceb.apply("desk", dry_run=True)  # ApplyResult: problems, errors, display_plan, audio_plan
-before = ceb.live_profile()               # what is on now, as a profile that is not stored
+before = ceb.live_profile()               # what is on now, not stored (AudioError if audio can't be read)
 ceb.apply_profile(before)                 # apply a profile object (the window's Test goes back this way)
 ceb.rename_profile("desk", "office")      # keeps its place in the list
 ceb.forget_screen(known.screens[0].screen)  # drop a screen from the history (forget_audio too)

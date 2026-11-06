@@ -73,8 +73,9 @@ class DemoAudio:
         self.sent = []
 
     def snapshot(self):
+        monitors = [AudioDevice(o.name + ".monitor", "Monitor of " + o.description) for o in self.state.outputs]
         return AudioState(list(self.state.outputs), list(self.state.inputs),
-                          self.state.default_output, self.state.default_input)
+                          self.state.default_output, self.state.default_input, monitors)
 
     def set_default_output(self, name):
         self.sent.append(("output", name))

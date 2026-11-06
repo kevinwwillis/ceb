@@ -125,16 +125,27 @@ def main(argv=None) -> int:
         win.present()
 
     app.connect("activate", activate)
-    if demo_dir:  # end cleanly (and remove the demo folder) when stopped from outside too
-        import signal
+    # Stopped from outside (logout, kill, Ctrl+C): a running test goes back first, a running switch
+    # ends, then the window closes and the program ends (and the demo folder is removed).
+    import signal
 
-        from .._signals import on_signals
-        on_signals((signal.SIGTERM, signal.SIGINT, signal.SIGHUP), lambda _s: app.quit())
+    from .._signals import on_signals
+    on_signals((signal.SIGTERM, signal.SIGINT, signal.SIGHUP), lambda _s: quit_on_signal(app))
     try:
         return app.run([sys.argv[0]])
     finally:
         if demo_dir:
             shutil.rmtree(demo_dir, ignore_errors=True)
+
+
+def quit_on_signal(app) -> None:
+    """Each CEB window goes back from a test and closes (CebWindow.quit_now); the application ends
+    when the last window has closed. With no window open, it ends at once."""
+    windows = [w for w in app.get_windows() if hasattr(w, "quit_now")]
+    if not windows:
+        app.quit()
+    for w in windows:
+        w.quit_now()
 
 
 def _add_icon_path(Gtk) -> None:

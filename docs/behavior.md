@@ -108,23 +108,41 @@ device not present):
 - Editing a profile in the window (dragging or adding screens, turning one off, the primary screen,
   audio output and input, the keyboard shortcut) never changes the live screens or audio, and
   nothing is written until Save. The edits are kept in memory per profile, with Undo and Redo,
-  until Save or Discard. A reload (a screen or audio device plugged in) keeps them.
+  until Save or Discard. A reload (a screen or audio device plugged in) keeps them, and so does a
+  `profiles.json` that cannot be read at that moment (the window keeps showing the profiles as last
+  read, says so in its banner, and Save reports the problem until it is fixed). A screen read that
+  started before an edit, Save or Discard is not shown; the screens are read again.
 - Save writes the profile only if `profiles.json` still holds the version the edits started from;
-  if it was changed meanwhile, the window asks whether to replace it or discard the edits. The
-  shortcut is written to GNOME after the profile; if that fails, the profile stays saved and the
-  shortcut stays an unsaved edit. A profile that holds screens not connected now saves like any
-  other.
+  if it was changed meanwhile, the window asks whether to replace it or discard the edits. Discard
+  always shows the profile as `profiles.json` holds it now. If the profile was deleted outside the
+  window while it had unsaved edits, the edits stay shown and the window asks once: save them as a
+  new profile with that name, or discard them. The shortcut is written to GNOME after the profile;
+  if that fails, the profile stays saved and the shortcut stays an unsaved edit. A profile that
+  holds screens not connected now saves like any other.
 - Only three things change the live screens and audio: "Switch to profile" (the saved profile,
   exactly what its keyboard shortcut and `ceb apply` do; unsaved edits are not used), the keyboard
   shortcut, and Test.
 - Test reads what is on now (screens, default output and input) first; if the screens cannot be
-  read, nothing is applied. It then applies the profile as shown, unsaved edits included, in the
+  read, nothing is applied. The default input is recorded exactly, also when it is a monitor source
+  ("Monitor of …", which PipeWire makes the default when there is no microphone), so going back
+  sets it again; a monitor source is never waited for as HDMI audio. If the audio devices cannot be
+  read, the test changes the screens only, leaves audio alone (it could not set it back), and says
+  so ("Audio not tested"). It then applies the profile as shown, unsaved edits included, in the
   same way as a switch (verify, then temporary). After the test length it applies what was on
   before, skipping anything that went away meanwhile (`allow_missing`), unless Keep was pressed. The
   countdown runs in the window's main loop and needs no click, so it goes back even when the tested
-  layout leaves the window on a screen that is now off. Closing the window during a test goes back
-  first, then closes. A profile switch from a keyboard shortcut during a test is undone when the
-  test goes back.
+  layout leaves the window on a screen that is now off.
+- If going back fails, the window keeps what to go back to and the bar offers Retry (and Keep, to
+  stay as it is). Closing the window during a test goes back first, then closes; so does SIGTERM,
+  SIGINT or SIGHUP (logout, `kill`, Ctrl+C), without asking about unsaved edits. "+" (new profile
+  from the current screens) is off during a test, since the screens are the tested ones. A profile
+  switch from a keyboard shortcut during a test is undone when the test goes back. Not covered: if
+  the process is killed outright (SIGKILL, a crash), the tested layout stays until GNOME next
+  reconfigures the screens; and per-monitor properties (HDR, underscan) are not recorded before a
+  test.
+- A profile saved from the current screens (`save-current`, "+") leaves the input unchanged when the
+  default source is a monitor: a monitor is not a microphone, and the Input picker does not offer
+  one.
 - The test length is one setting for all profiles: `settings.json` in the config folder,
   `{"version": 1, "test_seconds": 15}`, 15 s when there is none, kept between 3 and 600 s.
 

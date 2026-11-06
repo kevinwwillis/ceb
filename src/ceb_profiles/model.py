@@ -273,3 +273,14 @@ class AudioState:
     inputs: list[AudioDevice] = field(default_factory=list)
     default_output: str | None = None
     default_input: str | None = None
+    # "Monitor of <output>" sources. Not microphones, so not in `inputs` (not offered, not
+    # remembered), but PipeWire makes one the default source when there is no microphone, so
+    # going back after a test must be able to set one again.
+    monitors: list[AudioDevice] = field(default_factory=list)
+
+    def default_input_is_monitor(self) -> bool:
+        return self.default_input is not None and any(m.name == self.default_input for m in self.monitors)
+
+    def sources(self) -> list[AudioDevice]:
+        """Every source that can be the default input: microphones and monitors."""
+        return list(self.inputs) + list(self.monitors)

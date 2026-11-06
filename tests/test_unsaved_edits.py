@@ -3,7 +3,7 @@ calls Test uses. No display needed."""
 import json
 
 import pytest
-from conftest import UNITEK_OUT, desk
+from conftest import UNITEK_OUT, WEBCAM_IN, desk
 
 from ceb_profiles.core import ProfileChanged
 from ceb_profiles.gui import editor
@@ -185,10 +185,59 @@ def test_live_profile_is_what_is_on_now_and_is_not_stored(ceb):
     assert ceb.display.calls == []
 
 
-def test_live_profile_leaves_audio_alone_when_it_cannot_be_read(ceb):
+def test_live_profile_raises_when_audio_cannot_be_read_and_can_leave_it_out(ceb):
+    from ceb_profiles.audio import AudioError
     ceb.audio.down = True
-    before = ceb.live_profile()
+    with pytest.raises(AudioError):
+        ceb.live_profile()                       # never a silent "leave audio unchanged"
+    before = ceb.live_profile(include_audio=False)
     assert before.audio_output is None and before.audio_input is None and before.displays
+
+
+MONITOR = UNITEK_OUT.name + ".monitor"           # PipeWire's default source when there is no microphone
+
+
+def test_live_profile_records_a_monitor_default_source_and_going_back_sets_it(ceb):
+    ceb.audio.state.default_input = MONITOR
+    before = ceb.live_profile()
+    assert before.audio_input.name == MONITOR
+    ceb.audio.state.default_input = WEBCAM_IN.name   # what a test changed
+    r = ceb.apply_profile(before, allow_missing=True)
+    assert r.ok, r.summary_lines()
+    assert ceb.audio.state.default_input == MONITOR
+
+
+def test_a_monitor_source_is_never_waited_for_as_display_audio(ceb):
+    from conftest import LENOVO, ROG, mon, reply
+    from ceb_profiles.model import AudioRef
+    # Only the ROG is on now, so applying "desk" turns two screens on (HDMI audio may follow).
+    ceb.display.set(reply([mon("HDMI-1", LENOVO), mon("HDMI-2", LENOVO), mon("HDMI-3", ROG)],
+                          [(0, 0, True, ["HDMI-3"])]))
+    waits = []
+    ceb._sleep = waits.append
+    t = [0.0]
+    ceb._clock = lambda: t[0]
+
+    def tick(s):
+        waits.append(s)
+        t[0] += s
+    ceb._sleep = tick
+    p = ceb.profile("desk")
+    p.audio_output = None
+    p.audio_input = AudioRef("alsa_output.pci-0000_2d_00.1.hdmi-stereo.monitor", "Monitor of HDMI")
+    r = ceb.apply_profile(p)
+    assert waits == [] and r.refused                      # missing input reported at once
+    assert any(pr.kind == "missing_input" for pr in r.problems)
+    p.audio_input = AudioRef("alsa_input.pci-0000_2d_00.1.hdmi-stereo", "HDMI mic")   # not a monitor
+    ceb.apply_profile(p)
+    assert waits                                          # display audio: waited for, as before
+
+
+def test_save_current_leaves_the_input_unchanged_when_the_default_is_a_monitor(ceb):
+    ceb.audio.state.default_input = MONITOR
+    p = ceb.save_current("no mic")
+    assert p.audio_input is None and p.audio_output.name == UNITEK_OUT.name
+    assert ceb.apply("no mic", dry_run=True).ok   # nothing reported missing
 
 
 def test_apply_profile_applies_an_unsaved_profile_temporarily(ceb):

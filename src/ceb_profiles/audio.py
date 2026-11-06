@@ -58,11 +58,13 @@ class PulseAudioBackend:
         try:
             info = pulse.server_info()
             outputs = [AudioDevice(s.name, s.description) for s in pulse.sink_list()]
-            # Every output also has a "Monitor of ..." source; those are not microphones.
-            inputs = [AudioDevice(s.name, s.description) for s in pulse.source_list()
-                      if s.monitor_of_sink == PA_INVALID_INDEX]
+            # Every output also has a "Monitor of ..." source; those are not microphones. They are
+            # kept apart (AudioState.monitors), since one can be the default source.
+            sources = pulse.source_list()
+            inputs = [AudioDevice(s.name, s.description) for s in sources if s.monitor_of_sink == PA_INVALID_INDEX]
+            monitors = [AudioDevice(s.name, s.description) for s in sources if s.monitor_of_sink != PA_INVALID_INDEX]
             return AudioState(outputs, inputs, info.default_sink_name or None,
-                              info.default_source_name or None)
+                              info.default_source_name or None, monitors)
         except AudioError:
             raise
         except Exception as e:
