@@ -23,7 +23,7 @@ from ceb_profiles.core import Ceb  # noqa: E402
 from ceb_profiles.gui import editor  # noqa: E402
 from ceb_profiles.gui.demo import DemoAudio, DemoDisplay, seed  # noqa: E402
 from ceb_profiles.gui.shortcuts import Shortcuts  # noqa: E402
-from ceb_profiles.gui.window import CebWindow, ShortcutDialog, same_accel  # noqa: E402
+from ceb_profiles.gui.window import ACCELS, CebWindow, ShortcutDialog, same_accel  # noqa: E402
 from ceb_profiles.store import Store  # noqa: E402
 
 
@@ -33,6 +33,41 @@ def app():
                                   flags=Gio.ApplicationFlags.NON_UNIQUE)
     application.register(None)
     return application
+
+
+class FakeInhibit:
+    """Stands in for GtkApplication's logout inhibit: a test never reaches a session manager."""
+
+    def __init__(self):
+        self.calls, self.held, self.next = [], set(), 1
+
+    def inhibit(self, window, reason):
+        cookie, self.next = self.next, self.next + 1
+        self.calls.append(("inhibit", reason))
+        self.held.add(cookie)
+        return cookie
+
+    def uninhibit(self, window, cookie):
+        self.calls.append(("uninhibit", cookie))
+        self.held.discard(cookie)
+
+
+@pytest.fixture(autouse=True)
+def inhibits(monkeypatch):
+    fake = FakeInhibit()
+    monkeypatch.setattr(CebWindow, "_inhibit", lambda self, reason: fake.inhibit(self, reason))
+    monkeypatch.setattr(CebWindow, "_uninhibit", lambda self, cookie: fake.uninhibit(self, cookie))
+    return fake
+
+
+def window_triggers(win):
+    """The window's keyboard shortcuts: trigger string -> action name."""
+    out, c = {}, win.shortcut_controller
+    for i in range(c.get_n_items()):
+        trigger = c.get_item(i).get_trigger()
+        out[trigger.to_string()] = next(name for name, ts in ACCELS.items()
+                                        if any(Gtk.ShortcutTrigger.parse_string(t).equal(trigger) for t in ts))
+    return out
 
 
 @pytest.fixture
@@ -688,11 +723,12 @@ def test_the_bar_holds_the_actions_and_the_header_does_not(win):
     bar = win.bar_stack.compute_bounds(win)[1]
     assert bar.get_x() >= side.get_x() + side.get_width() - 1
     assert side.get_y() + side.get_height() >= bar.get_y() + bar.get_height() - 1
-    app = win.get_application()
-    assert app.get_accels_for_action("win.undo") == ["<Control>z"]
-    assert any(same_accel(a, "<Control><Shift>z") for a in app.get_accels_for_action("win.redo"))
-    assert app.get_accels_for_action("win.save") == ["<Control>s"]
-    assert app.get_accels_for_action("win.switch") == ["<Control>Return"]
+    triggers = window_triggers(win)
+    assert triggers["<Control>z"] == "undo" and triggers["<Control>s"] == "save"
+    assert triggers["<Control>Return"] == "switch" and triggers["<Control>n"] == "new-profile"
+    assert any(same_accel(t, "<Control><Shift>z") and a == "redo" for t, a in triggers.items())
+    # Window shortcuts, not application accelerators (those run before a focused text field).
+    assert win.get_application().get_accels_for_action("win.switch") == []
 
 
 def test_editing_never_touches_the_live_screens_or_audio(win):
@@ -1161,3 +1197,130 @@ def test_discard_after_an_outside_change_shows_what_is_stored_now(real):
     real.discard()
     assert real.profile().audio_output is None and not real.dirty()
     assert len(real.profile().displays.logical_monitors) == 3
+
+
+# ------------------------------------------------------------ second review (2026-11-05)
+
+
+def fail_go_back(real, dialogs):
+    from ceb_profiles.mutter import DisplayError
+    only_rog(real)
+    start_test(real, 30)
+    real.ceb.display.fail_with[0] = DisplayError("refused")
+    real.activate_action("win.test-back", None)
+    assert spin(lambda: not real._applying and real._testing is not None and real._testing.get("failed"))
+
+
+def test_closing_after_go_back_failed_asks_once_and_can_keep_and_close(real, dialogs):
+    shown(real)
+    fail_go_back(real, dialogs)
+    n = len(dialogs)
+    real.close()
+    assert len(dialogs) == n + 1 and "Go Back Before Closing" in dialogs[-1].get_heading()
+    assert real.get_visible() and not real._applying      # nothing retried behind the question
+    dialogs[-1].emit("response", "cancel")
+    assert real.get_visible() and real._testing.get("failed")
+    real.close()
+    dialogs[-1].emit("response", "keep")                  # keep the current screens and close
+    spin(lambda: False, 0.1)
+    if real.get_visible():                                # unsaved edits: that question comes next
+        assert "Save Changes" in dialogs[-1].get_heading()
+        dialogs[-1].emit("response", "discard")
+    assert spin(lambda: not real.get_visible())
+
+
+def test_closing_after_go_back_failed_can_retry_and_close(real, dialogs):
+    shown(real)
+    before = real.ceb.display.live()
+    fail_go_back(real, dialogs)
+    real.close()
+    dialogs[-1].emit("response", "retry")                 # GNOME accepts it this time
+    assert spin(lambda: real._testing is None and not real._applying)
+    assert real.ceb.display.live() == before
+    spin(lambda: False, 0.1)
+    if real.get_visible():
+        assert "Save Changes" in dialogs[-1].get_heading()
+        dialogs[-1].emit("response", "discard")
+    assert spin(lambda: not real.get_visible())
+
+
+def test_the_shortcut_dialog_shows_the_unsaved_shortcut(win):
+    win.open_profile("Center only")
+    assert win.set_shortcut("Center only", "<Control><Alt>p") is None
+    d = ShortcutDialog(win, "Center only")
+    assert d.shown.get_accelerator() == "<Control><Alt>p"           # not the saved Super+F3
+    other = ShortcutDialog(win, "Projector")                         # not the profile shown
+    assert other.shown.get_accelerator() == "<Super>F4"
+
+
+def test_logout_is_held_while_there_are_unsaved_edits_or_a_test(real, inhibits):
+    assert inhibits.held == set()
+    only_rog(real)
+    assert len(inhibits.held) == 1 and "unsaved" in inhibits.calls[-1][1]
+    real.activate_action("win.undo", None)
+    real.activate_action("win.undo", None)
+    assert not real.dirty() and inhibits.held == set()          # released when clean
+    real.activate_action("win.redo", None)
+    assert len(inhibits.held) == 1
+    assert real.save() and inhibits.held == set()
+    start_test(real, 30)                                        # the saved profile: nothing unsaved
+    assert len(inhibits.held) == 1
+    real.activate_action("win.test-back", None)
+    assert spin(lambda: real._testing is None and not real._applying)
+    assert inhibits.held == set()
+    real.output_row.set_selected(0)
+    assert len(inhibits.held) == 1
+    real.discard()
+    assert inhibits.held == set()
+
+
+def test_closing_releases_the_logout_hold(real, inhibits, dialogs):
+    shown(real)
+    only_rog(real)
+    assert inhibits.held
+    real.close()
+    dialogs[-1].emit("response", "discard")
+    assert spin(lambda: not real.get_visible()) and inhibits.held == set()
+
+
+def test_window_shortcuts_do_nothing_while_a_dialog_is_open(real):
+    shown(real)
+    only_rog(real)
+    dialog = Adw.AlertDialog(heading="Something", body="A question")
+    dialog.add_response("close", "_Close")
+    dialog.present(real)                                        # a real dialog in the window
+    assert spin(lambda: real.get_visible_dialog() is not None)
+    assert real.accel("switch") is False and real.accel("save") is False and real.accel("undo") is False
+    assert real.dirty() and real.ceb.display.calls == []
+    dialog.force_close()
+    assert spin(lambda: real.get_visible_dialog() is None)
+    assert real.accel("undo") is True                           # works again
+
+
+def test_window_shortcuts_leave_a_focused_text_field_alone(real):
+    shown(real)
+    real.test_seconds.grab_focus()
+    assert spin(lambda: isinstance(real.get_focus(), Gtk.Editable))
+    assert real.accel("switch") is False                        # Ctrl+Return in the seconds box
+    only_rog(real)
+    real.test_seconds.grab_focus()
+    assert real.accel("undo") is False and real.dirty()         # Ctrl+Z is the text field's
+    assert real.ceb.display.calls == []
+    real.canvas.grab_focus()
+    assert real.accel("undo") is True
+
+
+def test_ctrl_return_in_the_seconds_box_does_not_switch(real):
+    """The window's own Ctrl+Return shortcut, activated as GTK's shortcut controller would, with the
+    focus in the test length box: it declines (returns False), so nothing switches. (Synthesizing a
+    real key press under Broadway is not possible from a test.)"""
+    shown(real)
+    real.test_seconds.grab_focus()
+    assert spin(lambda: isinstance(real.get_focus(), Gtk.Editable))
+    trigger = Gtk.ShortcutTrigger.parse_string("<Control>Return")
+    used = [real.shortcut_controller.get_item(i).get_action().activate(Gtk.ShortcutActionFlags.EXCLUSIVE, real, None)
+            for i in range(real.shortcut_controller.get_n_items())
+            if real.shortcut_controller.get_item(i).get_trigger().equal(trigger)]
+    assert used == [False]
+    spin(lambda: False, 0.3)
+    assert not real._applying and real.ceb.display.calls == []

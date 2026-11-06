@@ -44,8 +44,9 @@ def version_problem(adw: tuple[int, int, int] | None, have_gi: bool = True) -> s
 
 
 def _have_gi() -> bool:
+    import importlib
     try:
-        import gi  # noqa: F401
+        importlib.import_module("gi")
     except ImportError:
         return False
     return True

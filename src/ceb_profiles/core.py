@@ -395,7 +395,7 @@ class Ceb:
             except AudioError:
                 state = None
             if state is not None:
-                present = {d.name for d in state.outputs} | {d.name for d in state.inputs}
+                present = {d.name for d in state.outputs} | {d.name for d in state.sources()}
                 if any(ref.name in present for ref in missing):
                     self.observe_best_effort(None, state)
                 missing = {ref for ref in missing if ref.name not in present}
@@ -412,6 +412,7 @@ def _ref(devices, name):
 
 
 _DISPLAY_AUDIO_HINTS = ("hdmi", "displayport")
+MONITOR_SUFFIX = ".monitor"   # PulseAudio/PipeWire name a monitor source "<output>.monitor"
 
 
 def _awaited_audio(profile: Profile, aplan: AudioPlan, dplan: DisplayPlan | None,
@@ -428,9 +429,10 @@ def _awaited_audio(profile: Profile, aplan: AudioPlan, dplan: DisplayPlan | None
     for kind, ref in (("output", profile.audio_output), ("input", profile.audio_input)):
         if ref is not None and f"missing_{kind}" in kinds:
             text = f"{ref.name} {ref.description}".lower()
-            # A monitor source ("<output>.monitor") is not display audio to wait for.
-            if ref.name.endswith(".monitor"):
-                continue
+            # A monitor source ("<output>.monitor") comes and goes with its output: it is waited for
+            # when that output is display audio, judged by the output's own name only.
+            if ref.name.endswith(MONITOR_SUFFIX):
+                text = ref.name[:-len(MONITOR_SUFFIX)].lower()
             if any(h in text for h in _DISPLAY_AUDIO_HINTS):
                 out.append((kind, ref))
     return out

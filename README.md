@@ -111,7 +111,8 @@ Keyboard: in the profile list, Tab and the arrow keys move the focus and Enter o
 profile. In the arrangement, the arrow keys select the next or previous screen and Ctrl+arrow keys
 move the selected screen one step, snapping like a drag, to the next place GNOME accepts. Ctrl+S
 saves, Ctrl+Z undoes, Ctrl+Shift+Z (or Ctrl+Y) redoes, Ctrl+Return switches to the saved profile,
-Ctrl+N saves the current screens as a new profile.
+Ctrl+N saves the current screens as a new profile. These do nothing while a dialog is open or a
+text field (such as the test length) has the focus; there Ctrl+Z undoes typing.
 
 Screens that mirror each other are one box with "+ N" in its name; each screen of the group is listed
 under "Selected screen", so it can be turned off on its own. Main menu > Remembered Devices lists the

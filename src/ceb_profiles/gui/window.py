@@ -51,6 +51,16 @@ CSS = """
 """
 
 
+# The window's keyboard shortcuts: action name -> triggers (see CebWindow.accel).
+ACCELS = {
+    "new-profile": ["<Control>n"],
+    "switch": ["<Control>Return", "<Control>KP_Enter"],
+    "save": ["<Control>s"],
+    "undo": ["<Control>z"],
+    "redo": ["<Control><Shift>z", "<Control>y"],
+}
+
+
 def accel_label(accel: str | None) -> str:
     if not accel:
         return ""
@@ -90,6 +100,7 @@ class CebWindow(Adw.ApplicationWindow):
         self._close_after_apply = False
         self._force_quit = False             # SIGTERM/SIGINT/SIGHUP: go back from a test, then close, no questions
         self._generation = 0                 # bumped by every edit, save, discard and reload
+        self._inhibit_cookie: int | None = None   # logout held while there are unsaved edits or a test
         self._orphan_asked: str | None = None
         self.settings, settings_problem = self._load_settings()
         self._settings_problem = settings_problem
@@ -361,12 +372,33 @@ class CebWindow(Adw.ApplicationWindow):
             "remember-background", None, GLib.Variant.new_boolean(self._background_on()))
         background.connect("change-state", self._on_remember_background)
         self.add_action(background)
-        app = self.get_application()
-        app.set_accels_for_action("win.new-profile", ["<Control>n"])
-        app.set_accels_for_action("win.switch", ["<Control>Return"])
-        app.set_accels_for_action("win.save", ["<Control>s"])
-        app.set_accels_for_action("win.undo", ["<Control>z"])
-        app.set_accels_for_action("win.redo", ["<Control><Shift>z", "<Control>y"])
+        # Not application accelerators: those run before the focused widget and also while a dialog
+        # is open. These run last (bubble phase), so a text field keeps its own Ctrl+Z, and
+        # accel() declines while a dialog is open or a text field has the focus.
+        controller = Gtk.ShortcutController(propagation_phase=Gtk.PropagationPhase.BUBBLE)
+        for name, triggers in ACCELS.items():
+            for trigger in triggers:
+                controller.add_shortcut(Gtk.Shortcut.new(
+                    Gtk.ShortcutTrigger.parse_string(trigger),
+                    Gtk.CallbackAction.new(lambda _w, _args, name=name: self.accel(name))))
+        self.add_controller(controller)
+        self.shortcut_controller = controller
+
+    def accel_allowed(self) -> bool:
+        """Keyboard shortcuts of the window work only when no dialog is open and no text field
+        (the test length box, a name field) has the focus."""
+        if self.get_visible_dialog() is not None:
+            return False
+        focus = self.get_focus()
+        return not isinstance(focus, Gtk.Editable)
+
+    def accel(self, name: str) -> bool:
+        """A window shortcut was pressed. Returns False (key not used) when it does not apply now."""
+        action = self.lookup_action(name)
+        if not self.accel_allowed() or action is None or not action.get_enabled():
+            return False
+        action.activate(None)
+        return True
 
     # ================================================================ data
 
@@ -531,12 +563,12 @@ class CebWindow(Adw.ApplicationWindow):
         if self.selected not in ids:
             self.selected = (editor.primary_screen(p) if p else None) or (ids[0] if ids else None)
 
-    def edit(self, change, *, from_widget_signal: bool = False) -> bool:
+    def edit(self, change) -> bool:
         """Change the selected profile with `change(profile)`. The change stays an unsaved edit
         (Undo, Redo, Discard, Save); nothing is written and the live screens and audio are never
-        touched. Returns True when there is a profile to edit (the caller redraws).
-        `from_widget_signal`: called from a widget's own signal (a combo row's notify::selected);
-        only the bar is redrawn, which leaves that widget alone."""
+        touched. Only the bar is redrawn here, so it is safe from a widget's own signal (a combo
+        row's notify::selected). Returns True when there is a profile to edit (the caller
+        redraws the rest)."""
         d = self.draft
         if d is None or d.name != self.current:
             return False
@@ -544,13 +576,6 @@ class CebWindow(Adw.ApplicationWindow):
         self._generation += 1
         self._refresh_bar()
         return True
-
-    @staticmethod
-    def _after(defer: bool, fn) -> None:
-        if defer:
-            GLib.idle_add(lambda: (fn(), False)[1])
-        else:
-            fn()
 
     def _shown_is_stored(self, name: str) -> bool:
         """True when profiles.json holds the profile as this window shows it."""
@@ -643,6 +668,32 @@ class CebWindow(Adw.ApplicationWindow):
             self._show_countdown()
         else:
             self.bar_stack.remove_css_class("ceb-testing")
+        self._update_logout_inhibit()
+
+    # ================================================================ logout
+
+    def _update_logout_inhibit(self) -> None:
+        """While there are unsaved edits, or a test is on screen (or starting, or going back), ask
+        the session not to log out without asking (GtkApplication logout inhibit): a logout would
+        otherwise end CEB with SIGTERM and lose the edits. Released as soon as neither holds."""
+        testing = self._testing is not None or self._busy_kind in ("test", "back")
+        need = not self._closed and (self.dirty() or testing)
+        if need and self._inhibit_cookie is None:
+            reason = ("CEB is testing a profile and will switch your screens back" if testing
+                      else "CEB has unsaved changes to a profile")
+            self._inhibit_cookie = self._inhibit(reason) or None
+        elif not need and self._inhibit_cookie is not None:
+            self._uninhibit(self._inhibit_cookie)
+            self._inhibit_cookie = None
+
+    def _inhibit(self, reason: str) -> int:
+        app = self.get_application()
+        return app.inhibit(self, Gtk.ApplicationInhibitFlags.LOGOUT, reason) if app is not None else 0
+
+    def _uninhibit(self, cookie: int) -> None:
+        app = self.get_application()
+        if app is not None:
+            app.uninhibit(cookie)
 
     def _refresh_canvas(self, p: Profile) -> None:
         items = []
@@ -1013,7 +1064,7 @@ class CebWindow(Adw.ApplicationWindow):
                 p.audio_output = ref
             else:
                 p.audio_input = ref
-        self.edit(change, from_widget_signal=True)
+        self.edit(change)
 
     def _on_change_shortcut(self, _button) -> None:
         p = self.profile()
@@ -1216,6 +1267,32 @@ class CebWindow(Adw.ApplicationWindow):
             self.close()  # done as asked; the screens show the outcome (told to quit: no choice left)
             return True
         return False  # something went wrong: stay open and show it; the person closes again
+
+    def _ask_close_after_failed_go_back(self) -> None:
+        """Closing after going back failed: one question, so the window can always be closed."""
+        name = self._testing["name"]
+        dialog = Adw.AlertDialog(heading="Go Back Before Closing?",
+                                 body=f"CEB could not go back to your screens and audio from before testing "
+                                      f"“{name}”. Try once more, or close and keep the screens as they are now.")
+        dialog.add_response("cancel", "_Cancel")
+        dialog.add_response("keep", "_Keep Current Screens and Close")
+        dialog.add_response("retry", "_Retry")
+        dialog.set_response_appearance("retry", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("retry")
+        dialog.set_close_response("cancel")
+
+        def done(_d, response):
+            if self._testing is None or not self._testing.get("failed") or self._applying:
+                return
+            if response == "retry":
+                self._close_after_apply = True   # closes if it works; else stays, Retry offered again
+                self._go_back()
+            elif response == "keep":
+                self._testing = None
+                self._refresh_bar()
+                self.close()
+        dialog.connect("response", done)
+        dialog.present(self)
 
     def quit_now(self) -> None:
         """SIGTERM, SIGINT or SIGHUP: go back from a running test (and let a running switch end),
@@ -1554,6 +1631,9 @@ class CebWindow(Adw.ApplicationWindow):
             self._close_after_apply = True
             self.toast("CEB closes when the switch is done")
             return True
+        if self._testing is not None and self._testing.get("failed") and not self._force_quit:
+            self._ask_close_after_failed_go_back()
+            return True
         if self._testing is not None:
             # Never leave a test on screen with nobody to take it back: go back, then close.
             self._close_after_apply = True
@@ -1564,6 +1644,7 @@ class CebWindow(Adw.ApplicationWindow):
             self.resolve_unsaved(self.close)  # Save or Discard, then close; Cancel stays open
             return True
         self._closed = True
+        self._update_logout_inhibit()   # released: nothing left to lose
         self._stop_test_timer()
         if self._audio_events is not None:
             self._audio_events.stop()
@@ -1640,7 +1721,9 @@ class ShortcutDialog(Adw.Dialog):
         title.add_css_class("title-4")
         hint = Gtk.Label(label="Esc to cancel, Backspace to remove the shortcut", wrap=True)
         hint.add_css_class("dim-label")
-        self.shown = Adw.ShortcutLabel(accelerator=window.keys.get(profile) or "", halign=Gtk.Align.CENTER)
+        d = window.draft
+        current = d.accel if d is not None and d.name == profile else window.keys.get(profile)  # unsaved one too
+        self.shown = Adw.ShortcutLabel(accelerator=current or "", halign=Gtk.Align.CENTER)
         self.message = Gtk.Label(wrap=True, visible=False)
         self.message.add_css_class("error")
         for w in (title, self.shown, hint, self.message):

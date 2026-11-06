@@ -207,30 +207,86 @@ def test_live_profile_records_a_monitor_default_source_and_going_back_sets_it(ce
     assert ceb.audio.state.default_input == MONITOR
 
 
-def test_a_monitor_source_is_never_waited_for_as_display_audio(ceb):
-    from conftest import LENOVO, ROG, mon, reply
-    from ceb_profiles.model import AudioRef
-    # Only the ROG is on now, so applying "desk" turns two screens on (HDMI audio may follow).
-    ceb.display.set(reply([mon("HDMI-1", LENOVO), mon("HDMI-2", LENOVO), mon("HDMI-3", ROG)],
-                          [(0, 0, True, ["HDMI-3"])]))
-    waits = []
-    ceb._sleep = waits.append
-    t = [0.0]
+def fake_clock(ceb):
+    waits, t = [], [0.0]
     ceb._clock = lambda: t[0]
 
     def tick(s):
         waits.append(s)
         t[0] += s
     ceb._sleep = tick
+    return waits
+
+
+def test_a_monitor_source_is_waited_for_only_when_its_output_is_display_audio(ceb):
+    from conftest import LENOVO, ROG, mon, reply
+    from ceb_profiles.model import AudioRef
+    # Only the ROG is on now, so applying "desk" turns two screens on (HDMI audio may follow).
+    ceb.display.set(reply([mon("HDMI-1", LENOVO), mon("HDMI-2", LENOVO), mon("HDMI-3", ROG)],
+                          [(0, 0, True, ["HDMI-3"])]))
+    waits = fake_clock(ceb)
     p = ceb.profile("desk")
     p.audio_output = None
-    p.audio_input = AudioRef("alsa_output.pci-0000_2d_00.1.hdmi-stereo.monitor", "Monitor of HDMI")
+    p.audio_input = AudioRef("alsa_output.usb-Some_Speaker-00.analog-stereo.monitor", "Monitor of Speaker")
     r = ceb.apply_profile(p)
-    assert waits == [] and r.refused                      # missing input reported at once
+    assert waits == [] and r.refused                      # not display audio: missing at once
     assert any(pr.kind == "missing_input" for pr in r.problems)
-    p.audio_input = AudioRef("alsa_input.pci-0000_2d_00.1.hdmi-stereo", "HDMI mic")   # not a monitor
+    # The monitor of an HDMI output appears with that output: waited for. The description is not
+    # looked at for a monitor ("Monitor of HDMI" says nothing about a USB output's monitor).
+    p.audio_input = AudioRef("alsa_output.pci-0000_2d_00.1.hdmi-stereo.monitor", "Monitor of GA102 HDMI")
     ceb.apply_profile(p)
-    assert waits                                          # display audio: waited for, as before
+    assert waits
+
+
+def test_going_back_restores_the_monitor_of_an_hdmi_output_the_test_turned_off(make_ceb):
+    """The default source is the monitor of the HDMI output on HDMI-1's screen. A test with only the
+    ROG on removes that output and its monitor; going back turns the screen on again, waits for the
+    monitor and sets it."""
+    from conftest import FakeAudio, HDMI_OUT, reply
+    hdmi_monitor = HDMI_OUT.name + ".monitor"
+    audio = FakeAudio(default_input=hdmi_monitor)
+    c = make_ceb(desk(1), audio=audio)
+    monitors = desk(1)[1]
+    real_apply = c.display.apply
+    appear_after = []                              # polls left before the HDMI output shows up
+
+    def poll(_n):
+        if appear_after and appear_after[0] > 0:
+            appear_after[0] -= 1
+            if appear_after[0] == 0:
+                audio.state.outputs.append(HDMI_OUT)
+    audio.on_snapshot = poll
+
+    def apply(serial, method, lms, props):          # GNOME + PipeWire: HDMI audio follows the screen
+        real_apply(serial, method, lms, props)
+        if method != 1:
+            return
+        c.display.set(reply(monitors, [(lm.x, lm.y, lm.primary, [m.connector for m in lm.monitors]) for lm in lms]))
+        if any(m.connector == "HDMI-1" for lm in lms for m in lm.monitors):
+            if HDMI_OUT not in audio.state.outputs:
+                appear_after[:] = [3]               # a moment after the screen comes on
+        else:
+            audio.state.outputs = [o for o in audio.state.outputs if o != HDMI_OUT]
+            if audio.state.default_input == hdmi_monitor:
+                audio.state.default_input = WEBCAM_IN.name    # PipeWire picks another source
+    c.display.apply = apply
+    waits = fake_clock(c)
+    before = c.live_profile()
+    assert before.audio_input.name == hdmi_monitor
+    c.save_current("rog only")
+    rog = c.profile("rog only")
+    rog.displays.logical_monitors = [lm for lm in rog.displays.logical_monitors
+                                     if lm.screens[0].screen.identity.vendor == "AUS"]
+    rog.displays.logical_monitors[0].x = 0
+    rog.displays.logical_monitors[0].primary = True
+    rog.audio_output = rog.audio_input = None
+    assert c.apply_profile(rog).ok
+    assert audio.state.default_input == WEBCAM_IN.name and HDMI_OUT not in audio.state.outputs
+    r = c.apply_profile(before, allow_missing=True)            # going back
+    assert r.ok, r.summary_lines()
+    assert waits                                                # it waited for the monitor
+    assert audio.state.default_input == hdmi_monitor
+    assert audio.state.default_output == before.audio_output.name
 
 
 def test_save_current_leaves_the_input_unchanged_when_the_default_is_a_monitor(ceb):

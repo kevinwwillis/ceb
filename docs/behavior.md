@@ -107,8 +107,11 @@ device not present):
 
 - Editing a profile in the window (dragging or adding screens, turning one off, the primary screen,
   audio output and input, the keyboard shortcut) never changes the live screens or audio, and
-  nothing is written until Save. The edits are kept in memory per profile, with Undo and Redo,
-  until Save or Discard. A reload (a screen or audio device plugged in) keeps them, and so does a
+  nothing is written until Save. The window holds one set of unsaved edits, for the profile shown,
+  in memory, with Undo and Redo, until Save or Discard; opening another profile, making a new one,
+  renaming, or closing the window with unsaved edits asks first (Save, Discard, Cancel). While
+  there are unsaved edits or a test is on screen, CEB asks the session not to log out without
+  asking (a logout inhibit), since a logout would end it. A reload (a screen or audio device plugged in) keeps them, and so does a
   `profiles.json` that cannot be read at that moment (the window keeps showing the profiles as last
   read, says so in its banner, and Save reports the problem until it is fixed). A screen read that
   started before an edit, Save or Discard is not shown; the screens are read again.
@@ -125,7 +128,9 @@ device not present):
 - Test reads what is on now (screens, default output and input) first; if the screens cannot be
   read, nothing is applied. The default input is recorded exactly, also when it is a monitor source
   ("Monitor of …", which PipeWire makes the default when there is no microphone), so going back
-  sets it again; a monitor source is never waited for as HDMI audio. If the audio devices cannot be
+  sets it again. A monitor source comes and goes with its output, so the monitor of an HDMI or
+  DisplayPort output is waited for like that output (up to 5 s after the screens change); the
+  monitor of any other output is not. If the audio devices cannot be
   read, the test changes the screens only, leaves audio alone (it could not set it back), and says
   so ("Audio not tested"). It then applies the profile as shown, unsaved edits included, in the
   same way as a switch (verify, then temporary). After the test length it applies what was on
@@ -133,7 +138,8 @@ device not present):
   countdown runs in the window's main loop and needs no click, so it goes back even when the tested
   layout leaves the window on a screen that is now off.
 - If going back fails, the window keeps what to go back to and the bar offers Retry (and Keep, to
-  stay as it is). Closing the window during a test goes back first, then closes; so does SIGTERM,
+  stay as it is). Closing the window then asks once: Retry, or keep the current screens and close.
+  Closing the window during a test goes back first, then closes; so does SIGTERM,
   SIGINT or SIGHUP (logout, `kill`, Ctrl+C), without asking about unsaved edits. "+" (new profile
   from the current screens) is off during a test, since the screens are the tested ones. A profile
   switch from a keyboard shortcut during a test is undone when the test goes back. Not covered: if

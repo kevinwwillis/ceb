@@ -152,9 +152,11 @@ def _single_instance(store_dir) -> object | None:
 def run(config_dir: str | None = None, *, ceb: Ceb | None = None) -> int:
     """The `ceb watch` command. Returns the exit code."""
     try:
+        import importlib
+
         import gi
         gi.require_version("Gio", "2.0")
-        from gi.repository import GLib  # noqa: F401
+        importlib.import_module("gi.repository.GLib")  # only checks that GLib loads
     except (ImportError, ValueError) as e:
         print(f"ceb watch: needs PyGObject (python3-gi): {e}", file=sys.stderr)
         return 1
