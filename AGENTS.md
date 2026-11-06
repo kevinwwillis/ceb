@@ -5,7 +5,7 @@ GNOME app (Python, GTK 4, libadwaita) for display profiles: screen on/off and po
 audio output and input device for each profile. It remembers every screen it has seen, also
 unplugged ones. Public, MIT, published on GitHub. First release: GNOME only.
 
-- Work is tracked in Backlog (`backlog/`); the plan is TASK-1 and its subtasks.
+- Work is tracked in Backlog in `backlog/`, a separate private git repo that is not published (ignored here); the plan is TASK-1 and its subtasks.
 - Screens are identified by vendor/product/serial, and identical twins by port order; never by
   port name alone (port names change between boots on multi-GPU machines).
 - Displays are applied without GNOME's "Keep changes" prompt (temporary apply).
