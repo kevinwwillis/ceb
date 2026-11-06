@@ -74,6 +74,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="apply what is present and skip missing screens or audio devices (reported)")
     p.add_argument("--no-notify", action="store_true", help="no desktop notification on failure")
 
+    p = sub.add_parser("login-layout",
+                       help="save a profile as GNOME's layout for the screens connected now, so the "
+                            "login screen and the next login start in it")
+    p.add_argument("name")
+    p.add_argument("--file", help="the monitors.xml to update (default: $XDG_CONFIG_HOME/monitors.xml)")
+    p.add_argument("--dry-run", action="store_true", help="print the layout; write nothing")
+
     sub.add_parser("gui", help="open the CEB window (same as ceb-gui; ceb gui --help for its options)",
                    add_help=False)
     p = sub.add_parser("delete", help="delete a profile and its keyboard shortcut")
@@ -129,7 +136,7 @@ def main(argv=None, *, ceb: Ceb | None = None, notifier=desktop_notify, on_termi
         if opts.command == "delete":
             return cmd_delete(ceb, opts, shortcuts)
         handler = {"list": cmd_list, "show": cmd_show, "save-current": cmd_save,
-                   "apply": cmd_apply}[opts.command]
+                   "apply": cmd_apply, "login-layout": cmd_login_layout}[opts.command]
         return handler(ceb, opts, sink)
     except (CebError, StoreError) as e:
         return _fail(f"ceb {opts.command} failed", str(e), sink)
@@ -157,7 +164,7 @@ def _usage_error(e: UsageError, args: list[str], notifier, on_terminal) -> int:
 
 
 _KNOWN_OPTIONS = {"--config-dir", "--json", "--force", "--no-audio", "--dry-run", "--allow-missing",
-                  "--no-notify", "--uninstall", "--help", "-h", "--version", "--"}
+                  "--no-notify", "--uninstall", "--file", "--help", "-h", "--version", "--"}
 
 
 def _fail(title: str, body: str, notifier) -> int:
@@ -327,6 +334,39 @@ def cmd_install_desktop(opts) -> int:
 
 
 # ---------------------------------------------------------------- apply
+
+
+def cmd_login_layout(ceb: Ceb, opts, _notifier) -> int:
+    """Writes the profile's screens as GNOME's saved layout for exactly the screens connected now.
+    When any screen of the profile is missing (or another problem), nothing is written and the
+    problems are listed: with a different set of screens GNOME keeps its own behavior."""
+    import xml.etree.ElementTree as ET
+
+    from . import monitors_xml
+    from .planner import plan_display
+
+    profile = ceb.profile(opts.name)
+    if not profile.displays:
+        print(f"ceb: profile {profile.name!r} has no screens; nothing to write", file=sys.stderr)
+        return EXIT_FAILED
+    state = ceb.display.get_state()
+    plan = plan_display(profile.displays, state, ceb._screen_names())
+    if plan.problems:
+        print(f"ceb login-layout: not written; {profile.name!r} cannot be used with the screens "
+              f"connected now:", file=sys.stderr)
+        for p in plan.problems:
+            print(f"  - {p.message}", file=sys.stderr)
+        return EXIT_FAILED
+    conf = monitors_xml.configuration_element(plan, state)
+    if opts.dry_run:
+        ET.indent(conf, space="  ")
+        print(ET.tostring(conf, encoding="unicode"))
+        return EXIT_OK
+    path = opts.file or monitors_xml.default_path()
+    changed = monitors_xml.merge(path, conf)
+    screens = ", ".join(sorted(m.connector for m in state.monitors))
+    print(f"{'saved' if changed else 'already saved'}: {profile.name!r} as the layout for {screens} in {path}")
+    return EXIT_OK
 
 
 def cmd_apply(ceb: Ceb, opts, notifier) -> int:
