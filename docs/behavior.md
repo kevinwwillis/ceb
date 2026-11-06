@@ -103,6 +103,39 @@ device not present):
   changed, so `ceb apply` says "only partly applied" and exits 1, or 3 with `--allow-missing`).
   Another device is never used in its place. Any other missing device refuses as above.
 
+## GNOME's saved layout (`ceb login-layout`)
+
+Applying a profile is temporary and ends at a reboot. To make GNOME itself start in a profile, at the
+login screen and at login, `ceb login-layout <profile>` writes the profile into GNOME's saved-layout
+file, `monitors.xml` (default `$XDG_CONFIG_HOME/monitors.xml`, or `--file`).
+
+- GNOME keys each saved layout by the exact set of connected screens, each named by port and EDID
+  strings (connector, vendor, product, serial) exactly as Mutter reports them; CEB copies them byte
+  for byte, padding included (`'L8LMQS075392 '`, `'GSV HDMI2.1  '`).
+- The layout is written for the screens connected now: the profile's screens where the profile puts
+  them, every other connected screen listed as disabled. Any saved layout for the same set of
+  screens is replaced; every other saved layout is kept, so with a different set connected GNOME
+  does what it did before.
+- If the profile cannot be used with the screens connected now (a screen missing, a mode not
+  offered), nothing is written, the problems are listed, and the command exits 1.
+- Because the key includes the port names, a machine whose ports are renumbered between boots needs
+  one layout per numbering. Running `ceb login-layout` at every login adds the numbering of that
+  boot; on the first boot with a numbering never seen before, the login screen and that login get
+  GNOME's default, and later boots with that numbering get the profile.
+- GNOME also uses a saved layout when screens are plugged in or out while it runs: with that same
+  set connected again, it goes back to the saved layout.
+- A layout GNOME would reject is never written (a position outside 0..32767, an empty screen field,
+  or characters XML cannot hold), because GNOME ignores every layout in a file it cannot read. A
+  file that is not a readable `monitors.xml` is left unchanged and the command exits 1.
+- The file is replaced atomically and only when its content changes. GNOME does not reread it while
+  running; it uses it at the next login screen or login.
+- GNOME also reads a system-wide `monitors.xml` in each `$XDG_CONFIG_DIRS` folder (usually
+  `/etc/xdg/monitors.xml`), at the login screen and at login, and never writes it; for the same
+  set of screens the user's own file wins. To have the login screen use the profile, put the
+  layout in that system file. That needs root, which CEB does not do. (The login screen's own
+  settings folder, on Ubuntu with GNOME 50 `/var/lib/gdm3/seat0/config/`, belongs to a user GDM
+  creates at each start, so a file copied there is harder to keep.)
+
 ## The window: saving, switching and testing
 
 - Editing a profile in the window (dragging or adding screens, turning one off, the primary screen,

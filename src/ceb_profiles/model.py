@@ -104,6 +104,9 @@ class ConnectedMonitor:
     # True when this monitor's twins were ordered by port name only because the GPU of some (not
     # all) of them could not be read; the planner reports it as a note.
     twin_order_without_gpu: bool = False
+    # (connector, vendor, product, serial) exactly as Mutter reports them, whitespace kept: GNOME's
+    # saved-layout file (monitors.xml) must repeat them byte for byte to match.
+    raw_spec: tuple[str, str, str, str] | None = None
 
     @property
     def screen_id(self) -> ScreenId:

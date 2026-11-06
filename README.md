@@ -138,11 +138,18 @@ ceb show desk
 ceb apply desk --dry-run         # plan it and let GNOME verify it; changes nothing
 ceb apply desk                   # switch (no "Keep changes" prompt)
 ceb apply desk --allow-missing   # apply what is present, report what is skipped
+ceb login-layout desk           # make desk GNOME's layout for the screens connected now (login screen, login)
 ceb delete desk                  # the profile and its keyboard shortcut
 ceb watch                        # keep running and remember every screen and audio device
 ceb install-desktop              # add CEB to the applications menu
 ceb --config-dir DIR <command>   # profiles and history in DIR instead of ~/.config/ceb
 ```
+
+`ceb login-layout` writes the profile into GNOME's own saved-layout file (`~/.config/monitors.xml`, or
+`--file`) for exactly the set of screens connected now, with every screen the profile does not use
+turned off. GNOME then starts in that layout whenever that same set is connected; with any other
+set it behaves as before. Copying its layouts into the system-wide `/etc/xdg/monitors.xml` (as root)
+makes the login screen use it too. See [docs/behavior.md](docs/behavior.md#gnomes-saved-layout-ceb-login-layout).
 
 A profile name may start with "-"; on the command line it then goes after `--`, as with other
 Unix tools: `ceb apply -- -work`.

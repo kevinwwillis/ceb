@@ -123,7 +123,7 @@ def parse_current_state(reply: tuple, gpu_of=lambda connector: None) -> DisplayS
             connector=connector, identity=identity,
             display_name=str(mprops.get("display-name") or f"{vendor} {product}".strip()),
             modes=modes, is_builtin=bool(mprops.get("is-builtin", False)),
-            gpu=gpu_of(connector)))
+            gpu=gpu_of(connector), raw_spec=(str(connector), str(vendor), str(product), str(mserial))))
     rank_twins(monitors)
     logical = [LogicalMonitorState(x=int(x), y=int(y), scale=float(scale), transform=int(transform),
                                    primary=bool(primary), connectors=[spec[0] for spec in specs])
